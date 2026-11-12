@@ -9,15 +9,31 @@ Customers of an Israeli catering company write in Hebrew or English, by email, W
 AI Quote Agent reads the request, extracts structured details, matches them to the real catalog,
 prices them with deterministic business rules, and drafts the quote for a human to approve.
 
-> 🚧 Work in progress: see the roadmap below.
+**Live demo:** `demo/index.html` (runs the full pipeline in the browser with Claude).
+
+## Features
+
+- **Free-text intake**: Hebrew/English, WhatsApp slang, voice transcripts, relative dates.
+- **Three packages** (basic / recommended / premium) derived from the AI's menu by fixed
+  upgrade/downgrade rules, so prices stay consistent and explainable.
+- **Plain-language editing with tool use**: *"swap the skewers for sushi and drop to 100 guests"*.
+  Claude calls `search_catalog`, `replace_item`, `set_guest_count`… There is **no tool that
+  changes a price**: discount requests are routed to `flag_for_human`.
+- **Learning from corrections**: when a salesperson fixes a match, it is stored and injected as a
+  few-shot example into the next menu prompt. Each approved quote logs kept vs corrected lines,
+  giving an accuracy curve over time (`GET /metrics/accuracy`).
+- **Guards in code**: no meat/dairy mixing at kosher events, unknown SKUs dropped, minimum
+  orders, quantity/guest bounds, injection attempts flagged.
 
 ## Architecture
 
 ```
-customer message ──► LLM extraction ──► catalog matching ──► pricing engine ──► human review ──► PDF + email
-   (he / en)        (Claude, forced     (multilingual       (plain Python,     (confidence
-                     tool use → JSON)    embeddings +        no LLM)            colours)
-                                         pgvector)
+customer message ─► extraction ─► menu plan ─► pricing engine ─► 3 tiers ─► human review
+   (he / en)        (Claude,        (Claude, only   (plain Python,    (rules)    │  ▲
+                    forced tool     compatible      no LLM)                      │  │ corrections →
+                    use → JSON)     catalog +                                    │  │ few-shot
+                                    few-shot)                                    ▼  │
+                                                     plain-language edit (Claude + tools) ─► re-price
 ```
 
 **Key design decisions**
@@ -49,6 +65,17 @@ python evals/run_extraction.py --only he-009,en-004  # just the injection cases
 | Model | Prompt | Pass rate | Avg latency | Notes |
 |---|---|---|---|---|
 | _to be filled after first run_ | extract-v1 | | | |
+
+## API
+
+| Method | Path | What it does |
+|---|---|---|
+| POST | `/extract` | Free text → structured request |
+| POST | `/quote` | Full pipeline → request, menu plan, 3 priced tiers |
+| POST | `/quote/edit` | Plain-language edit via tool-use agent → re-priced tiers, actions log, flags |
+| POST | `/corrections` | Store a salesperson's match correction |
+| POST | `/reviews` | Log an approved quote (lines kept vs corrected) |
+| GET | `/metrics/accuracy` | Rolling accuracy series for the learning chart |
 
 ## Running locally
 
@@ -82,7 +109,7 @@ backend/
   app/
     llm/          client (forced tool use) + versioned prompts
     schemas/      Pydantic contracts: ExtractedRequest, CatalogItem
-    services/     extraction (later: matching, pricing, quotes)
+    services/     extraction, menu planning, pricing, tiers, editing (agent), corrections
     catalog/      loader + embeddings
   scripts/        seed_catalog
   tests/
@@ -95,8 +122,11 @@ evals/               cases, metrics, runner, results
 - [x] Project skeleton, Postgres + pgvector
 - [x] Demo catalog (93 items) + embedding seed
 - [x] Structured extraction + 41-case eval set
-- [ ] Catalog matching with confidence scores
-- [ ] Deterministic pricing engine (quantity rules per guest, staff ratios, VAT)
+- [x] Menu planning with confidence scores (compatible-catalog retrieval)
+- [x] Deterministic pricing engine (quantity rules per guest, staff ratios, VAT)
+- [x] Three packages, plain-language editing with tool use, learning from corrections
+- [x] Live browser demo
+- [ ] pgvector semantic retrieval once the catalog outgrows the prompt
 - [ ] Quotes, statuses, Hebrew RTL PDF
 - [ ] Angular UI: inbox, review screen, dashboard
 - [ ] AI-drafted cover email + sending

@@ -9,3 +9,4 @@ node_modules/
 dist/
 evals/results/*.json
 !evals/results/.gitkeep
+data/corrections.json
