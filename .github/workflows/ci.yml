@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # sentence-transformers (torch) is not needed for tests; install the light deps only
+      - run: pip install fastapi pydantic pydantic-settings anthropic sqlalchemy "psycopg[binary]" pgvector pytest httpx ruff
+      - run: ruff check . ../evals
+      - run: pytest -q
