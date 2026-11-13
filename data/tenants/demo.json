@@ -1,0 +1,49 @@
+{
+  "tenant_id": "demo",
+  "name": "זית ודבש קייטרינג",
+  "api_key_env": null,
+  "integrations": [
+    {
+      "id": "zapier-webhook",
+      "type": "webhook",
+      "enabled": false,
+      "events": ["quote.created", "quote.updated", "quote.sent", "quote.approved", "quote.rejected"],
+      "settings": {
+        "url": "https://hooks.zapier.com/hooks/catch/000000/abcdef/",
+        "secret_env": "DEMO_WEBHOOK_SECRET"
+      },
+      "mapping": {
+        "contact": {"full_name": "name", "mobile": "phone", "email": "email"},
+        "deal": {"title": "{title}", "value": "amount_total", "event_date": "event_date", "guests": "guest_count"},
+        "stages": {"new": "ליד חדש", "quoted": "הצעה נשלחה", "won": "נסגר", "lost": "אבוד"}
+      }
+    },
+    {
+      "id": "hubspot",
+      "type": "hubspot",
+      "enabled": false,
+      "events": ["quote.created", "quote.updated", "quote.approved", "quote.rejected"],
+      "settings": {"token_env": "DEMO_HUBSPOT_TOKEN", "pipeline": "default"},
+      "mapping": {
+        "stages": {"new": "appointmentscheduled", "quoted": "presentationscheduled", "won": "closedwon", "lost": "closedlost"}
+      }
+    },
+    {
+      "id": "monday",
+      "type": "monday",
+      "enabled": false,
+      "events": ["quote.created", "quote.updated", "quote.sent", "quote.approved", "quote.rejected"],
+      "settings": {
+        "token_env": "DEMO_MONDAY_TOKEN",
+        "board_id": "1234567890",
+        "status_column": "status",
+        "column_types": {"date4": "date", "numbers": "numbers", "phone": "phone", "email": "email"}
+      },
+      "mapping": {
+        "contact": {"phone": "phone", "email": "email", "text": "name"},
+        "deal": {"date4": "event_date", "numbers": "amount_total", "text0": "{guest_count} אורחים · {kashrut}"},
+        "stages": {"new": "חדש", "quoted": "הצעה נשלחה", "won": "נסגר", "lost": "אבוד"}
+      }
+    }
+  ]
+}

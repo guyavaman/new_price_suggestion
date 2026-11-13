@@ -66,16 +66,36 @@ python evals/run_extraction.py --only he-009,en-004  # just the injection cases
 |---|---|---|---|---|
 | _to be filled after first run_ | extract-v1 | | | |
 
+## CRM integration
+
+Built to drop into whatever CRM a business already uses, without touching the core:
+
+- **One versioned contract**: every quote becomes a CRM-neutral `QuoteEvent` (contact, deal,
+  line items) with a published [JSON Schema](docs/schemas/quote-event.v1.json).
+- **Signed webhooks** (HMAC-SHA256, replay protection, idempotency key, retries): works with any
+  CRM directly or through Zapier / Make / n8n. A ready receiver is in `examples/`.
+- **Native adapters** for HubSpot and monday.com. A new CRM is one class with `sync(event, refs)`.
+- **Per-tenant field and pipeline-stage mapping** in a JSON config, secrets via env vars.
+- **No duplicates**: CRM ids are remembered per quote, so later events update the same deal.
+- **Pull options**: REST API with per-tenant API keys and CSV exports (Excel-friendly Hebrew).
+
+Full guide: [docs/INTEGRATION.md](docs/INTEGRATION.md).
+
 ## API
+
+All calls send `X-Tenant-ID` (+ `X-API-Key` if configured). OpenAPI at `/docs`.
 
 | Method | Path | What it does |
 |---|---|---|
-| POST | `/extract` | Free text → structured request |
-| POST | `/quote` | Full pipeline → request, menu plan, 3 priced tiers |
-| POST | `/quote/edit` | Plain-language edit via tool-use agent → re-priced tiers, actions log, flags |
-| POST | `/corrections` | Store a salesperson's match correction |
-| POST | `/reviews` | Log an approved quote (lines kept vs corrected) |
-| GET | `/metrics/accuracy` | Rolling accuracy series for the learning chart |
+| POST | `/quotes` | Free text → saved quote with 3 priced tiers → `quote.created` to CRMs |
+| GET | `/quotes`, `/quotes/{id}` | List / read (tenant-isolated) |
+| POST | `/quotes/{id}/edit` | Plain-language edit via tool-use agent → re-priced → `quote.updated` |
+| POST | `/quotes/{id}/status` | sent / approved / rejected / expired (+ chosen tier) → CRM stage |
+| GET | `/quotes/{id}/event` | Preview the exact CRM payload |
+| POST | `/quotes/{id}/sync`, GET `/quotes/{id}/sync-log` | Re-push, delivery log |
+| GET | `/exports/deals.csv`, `/exports/line-items.csv` | CRM import files |
+| POST | `/extract` | Free text → structured request only |
+| POST | `/corrections`, `/reviews`; GET `/metrics/accuracy` | Learning from corrections |
 
 ## Running locally
 
@@ -110,10 +130,16 @@ backend/
     llm/          client (forced tool use) + versioned prompts
     schemas/      Pydantic contracts: ExtractedRequest, CatalogItem
     services/     extraction, menu planning, pricing, tiers, editing (agent), corrections
+    integrations/ canonical event, tenant config + mapping, sync service, exports
+      adapters/   webhook, hubspot, monday
+    repositories/ quote storage interface (JSON today, DB-ready)
     catalog/      loader + embeddings
   scripts/        seed_catalog
   tests/
 data/catalog.jsonl   93 kosher-catering items (Hebrew + English)
+data/tenants/        per-tenant integration config
+docs/                integration guide + JSON Schema
+examples/            webhook receiver for clients
 evals/               cases, metrics, runner, results
 ```
 
@@ -126,6 +152,8 @@ evals/               cases, metrics, runner, results
 - [x] Deterministic pricing engine (quantity rules per guest, staff ratios, VAT)
 - [x] Three packages, plain-language editing with tool use, learning from corrections
 - [x] Live browser demo
+- [x] CRM integration layer: canonical events, signed webhooks, HubSpot, monday.com, CSV
+- [ ] Tenant pricing rules in config (staff ratios, discounts, delivery zones)
 - [ ] pgvector semantic retrieval once the catalog outgrows the prompt
 - [ ] Quotes, statuses, Hebrew RTL PDF
 - [ ] Angular UI: inbox, review screen, dashboard

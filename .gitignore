@@ -10,3 +10,4 @@ dist/
 evals/results/*.json
 !evals/results/.gitkeep
 data/corrections.json
+data/store/

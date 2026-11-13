@@ -86,8 +86,16 @@ class RequestedItem(BaseModel):
     notes: str | None = None
 
 
+class ContactInfo(BaseModel):
+    name: str | None = Field(None, description="Customer's name if they signed or stated it.")
+    phone: str | None = Field(None, description="Phone number exactly as written.")
+    email: str | None = None
+    company: str | None = Field(None, description="Company/organization name, if stated.")
+
+
 class ExtractedRequest(BaseModel):
     language: str = Field(..., description="'he' or 'en' — language of the customer message.")
+    contact: ContactInfo = Field(default_factory=ContactInfo)
     event_type: EventType | None = None
     guest_count: int | None = Field(None, description="Total number of guests, if stated.")
     event_date: date | None = Field(

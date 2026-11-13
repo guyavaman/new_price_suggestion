@@ -69,3 +69,19 @@ class PricedQuote(BaseModel):
     per_guest: float | None = None
     budget: BudgetCheck | None = None
     guards: list[str] = Field(default_factory=list)
+
+
+class TierQuote(BaseModel):
+    key: str  # basic | recommended | premium
+    name: str
+    changes: list[str] = Field(default_factory=list)
+    plan: MenuPlan
+    quote: PricedQuote
+
+
+class QuoteStatus(StrEnum):
+    draft = "draft"  # generated, awaiting salesperson review
+    sent = "sent"  # sent to the customer
+    approved = "approved"  # customer accepted -> deal won
+    rejected = "rejected"  # customer declined -> deal lost
+    expired = "expired"

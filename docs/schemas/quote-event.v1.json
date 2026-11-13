@@ -1,0 +1,399 @@
+{
+  "$defs": {
+    "Contact": {
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "first_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Name"
+        },
+        "last_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Name"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "E.164 when normalisable, e.g. +972501234567",
+          "title": "Phone"
+        },
+        "phone_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Phone Raw"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "company": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Company"
+        },
+        "language": {
+          "default": "he",
+          "title": "Language",
+          "type": "string"
+        }
+      },
+      "title": "Contact",
+      "type": "object"
+    },
+    "Deal": {
+      "properties": {
+        "quote_id": {
+          "title": "Quote Id",
+          "type": "string"
+        },
+        "quote_number": {
+          "title": "Quote Number",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/QuoteStatus"
+        },
+        "stage": {
+          "$ref": "#/$defs/DealStage"
+        },
+        "tier": {
+          "title": "Tier",
+          "type": "string"
+        },
+        "currency": {
+          "default": "ILS",
+          "title": "Currency",
+          "type": "string"
+        },
+        "amount_net": {
+          "description": "After discount, before VAT",
+          "title": "Amount Net",
+          "type": "number"
+        },
+        "vat": {
+          "title": "Vat",
+          "type": "number"
+        },
+        "amount_total": {
+          "description": "Including VAT",
+          "title": "Amount Total",
+          "type": "number"
+        },
+        "discount": {
+          "default": 0,
+          "title": "Discount",
+          "type": "number"
+        },
+        "event_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Type"
+        },
+        "event_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Date"
+        },
+        "guest_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Guest Count"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "kashrut": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kashrut"
+        },
+        "meal_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Meal Type"
+        },
+        "dietary_summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dietary Summary"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "quote_id",
+        "quote_number",
+        "title",
+        "status",
+        "stage",
+        "tier",
+        "amount_net",
+        "vat",
+        "amount_total",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "Deal",
+      "type": "object"
+    },
+    "DealStage": {
+      "description": "CRM-neutral pipeline stage. Each tenant maps these to their own pipeline.",
+      "enum": [
+        "new",
+        "quoted",
+        "won",
+        "lost"
+      ],
+      "title": "DealStage",
+      "type": "string"
+    },
+    "EventType": {
+      "enum": [
+        "quote.created",
+        "quote.updated",
+        "quote.sent",
+        "quote.approved",
+        "quote.rejected",
+        "quote.expired"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "LineItem": {
+      "properties": {
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "quantity": {
+          "title": "Quantity",
+          "type": "number"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        },
+        "unit_price": {
+          "description": "Before VAT",
+          "title": "Unit Price",
+          "type": "number"
+        },
+        "total": {
+          "description": "Before VAT",
+          "title": "Total",
+          "type": "number"
+        },
+        "source": {
+          "description": "requested | suggested | rule",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sku",
+        "name",
+        "quantity",
+        "unit",
+        "unit_price",
+        "total",
+        "source"
+      ],
+      "title": "LineItem",
+      "type": "object"
+    },
+    "QuoteStatus": {
+      "enum": [
+        "draft",
+        "sent",
+        "approved",
+        "rejected",
+        "expired"
+      ],
+      "title": "QuoteStatus",
+      "type": "string"
+    }
+  },
+  "description": "What webhooks deliver and what every adapter receives.",
+  "properties": {
+    "id": {
+      "description": "Unique per event. Use it as an idempotency key.",
+      "title": "Id",
+      "type": "string"
+    },
+    "type": {
+      "$ref": "#/$defs/EventType"
+    },
+    "schema_version": {
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "occurred_at": {
+      "format": "date-time",
+      "title": "Occurred At",
+      "type": "string"
+    },
+    "tenant_id": {
+      "title": "Tenant Id",
+      "type": "string"
+    },
+    "contact": {
+      "$ref": "#/$defs/Contact"
+    },
+    "deal": {
+      "$ref": "#/$defs/Deal"
+    },
+    "line_items": {
+      "items": {
+        "$ref": "#/$defs/LineItem"
+      },
+      "title": "Line Items",
+      "type": "array"
+    }
+  },
+  "required": [
+    "type",
+    "tenant_id",
+    "contact",
+    "deal",
+    "line_items"
+  ],
+  "title": "QuoteEvent",
+  "type": "object"
+}
