@@ -119,3 +119,39 @@ def test_long_conversation_stops_calling_the_model(env):
     r = agent.chat("acme", "עוד אחת", conv.id)
     assert r.reply == LONG_CHAT_REPLY and not called
     assert agent.chat("acme", "ועוד", conv.id).reply == ""  # said once, then quiet
+
+
+def test_structured_output_without_forced_tool_choice(monkeypatch):
+    """Newer models reject a forced tool_choice: ask for the tool call instead (and retry)."""
+    import httpx
+    from anthropic import BadRequestError
+    from pydantic import BaseModel
+
+    class Out(BaseModel):
+        n: int
+
+    monkeypatch.setattr(LLMClient, "_force_tool", True)
+    calls = []
+
+    def create(**kw):
+        calls.append(kw)
+        if kw["tool_choice"]["type"] == "tool":
+            raise BadRequestError(
+                "tool_choice: type \"tool\" and \"any\" are not supported for this model.",
+                response=httpx.Response(400, request=httpx.Request("POST", "http://x")), body=None)
+        usage = SimpleNamespace(input_tokens=1, output_tokens=1)
+        if len(calls) == 2:  # first try answers in text
+            text = SimpleNamespace(type="text", text="sure", model_dump=lambda: {
+                "type": "text", "text": "sure"})
+            return SimpleNamespace(content=[text], usage=usage)
+        tool = SimpleNamespace(type="tool_use", name="rec", input={"n": 7}, id="1")
+        return SimpleNamespace(content=[tool], usage=usage)
+
+    llm = LLMClient(model="t", client=SimpleNamespace(messages=SimpleNamespace(create=create)))
+    out, _ = llm.structured(system="s", user="u", schema=Out, tool_name="rec",
+                            tool_description="d")
+    assert out.n == 7 and [c["tool_choice"]["type"] for c in calls] == ["tool", "auto", "auto"]
+    assert "calling the `rec` tool" in calls[1]["system"]
+    calls.clear()
+    llm.structured(system="s", user="u", schema=Out, tool_name="rec", tool_description="d")
+    assert calls[0]["tool_choice"]["type"] == "auto"  # remembered: no failing call again

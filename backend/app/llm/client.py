@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeVar
 
-from anthropic import Anthropic
+from anthropic import Anthropic, BadRequestError
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -58,6 +58,34 @@ class LLMClient:
             ai_budget.spend()
         return self._client.messages.create(**kw)
 
+    _force_tool = True  # flips off for models that reject a forced tool_choice
+
+    def _call_tool(self, system: str, user: str, tool: dict, tool_name: str):
+        """Get the model to answer by calling `tool`. Forced tool_choice where the model
+        supports it; otherwise ask for the call explicitly and retry once if it answered in text."""
+        messages: list[dict] = [{"role": "user", "content": user}]
+        kw = {"model": self.model, "max_tokens": self.max_tokens, "tools": [tool]}
+        if self._force_tool:
+            try:
+                r = self._create(system=system, messages=messages,
+                                 tool_choice={"type": "tool", "name": tool_name}, **kw)
+                return r, _tool_input(r, tool_name)
+            except BadRequestError as e:
+                if "tool_choice" not in str(e):
+                    raise
+                type(self)._force_tool = False
+        system = f"{system}\n\nRespond only by calling the `{tool_name}` tool."
+        r = None
+        for _ in range(2):
+            r = self._create(system=system, messages=messages, tool_choice={"type": "auto"}, **kw)
+            found = _tool_input(r, tool_name)
+            if found is not None:
+                return r, found
+            messages = [*messages, {"role": "assistant", "content": [b.model_dump() for b in
+                                                                     r.content]},
+                        {"role": "user", "content": f"Call the `{tool_name}` tool now."}]
+        return r, None
+
     def structured(
         self,
         *,
@@ -73,20 +101,8 @@ class LLMClient:
             "input_schema": schema.model_json_schema(),
         }
         start = time.perf_counter()
-        response = self._create(
-            model=self.model,
-            max_tokens=self.max_tokens,
-            system=system,
-            tools=[tool],
-            tool_choice={"type": "tool", "name": tool_name},
-            messages=[{"role": "user", "content": user}],
-        )
+        response, tool_input = self._call_tool(system, user, tool, tool_name)
         latency_ms = int((time.perf_counter() - start) * 1000)
-
-        tool_input = next(
-            (b.input for b in response.content if b.type == "tool_use" and b.name == tool_name),
-            None,
-        )
         if tool_input is None:
             raise ValueError("Model did not call the structured-output tool")
 
@@ -169,3 +185,8 @@ class LLMClient:
 
         run.latency_ms = int((time.perf_counter() - start) * 1000)
         return run
+
+
+def _tool_input(response, tool_name: str):
+    return next((b.input for b in response.content
+                 if b.type == "tool_use" and b.name == tool_name), None)
