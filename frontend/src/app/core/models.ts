@@ -123,3 +123,32 @@ export interface ChatReply {
   lead_score: number;
   actions: string[];
 }
+
+// ---------- quotes ----------
+export interface QuoteLine {
+  sku: string; name_he: string; unit: string; unit_price: number; quantity: number; total: number;
+  note: string; source: 'requested' | 'suggested' | 'rule'; confidence: 'high' | 'medium' | 'low' | 'rule'; reason: string;
+}
+export interface PricedQuote {
+  lines: QuoteLine[]; subtotal: number; discount_rate: number; discount: number; net: number; vat: number;
+  total: number; per_guest: number | null; budget: { ok: boolean; text: string } | null; guards: string[];
+}
+export interface TierQuote { key: 'basic' | 'recommended' | 'premium'; name: string; changes: string[]; plan: { cover_note: string; unmatched: string[] }; quote: PricedQuote }
+export interface ExtractedRequest {
+  language: string;
+  contact: { name: string | null; phone: string | null; email: string | null; company: string | null };
+  event_type: string | null; guest_count: number | null; event_date: string | null; location: string | null;
+  kashrut: string | null; meal_type: string | null;
+  dietary_requirements: { tag: string; guest_count: number | null }[];
+  budget: { amount: number; scope: 'total' | 'per_guest' } | null;
+  requested_items: { description: string; quantity: number | null }[];
+  missing_info: string[]; suspicious_instructions: boolean;
+}
+export type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'expired';
+export interface StoredQuote {
+  id: string; number: string; status: QuoteStatus; selected_tier: string; source_message: string;
+  request: ExtractedRequest; tiers: TierQuote[]; created_at: string; updated_at: string;
+  history: { status: QuoteStatus; at: string; note: string | null }[];
+}
+export interface QuoteOut { quote: StoredQuote; sync: { integration_id: string; ok: boolean; detail: string }[] }
+export interface EditOut extends QuoteOut { reply: string; actions: { tool: string; input: Record<string, unknown>; error: boolean }[]; flags: string[] }

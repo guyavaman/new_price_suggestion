@@ -73,6 +73,7 @@ class AgentReply(BaseModel):
     actions: list[dict] = Field(default_factory=list)
     deal: Deal | None = None
     customer: Customer | None = None
+    usage: dict = Field(default_factory=dict, description="tokens and latency for this turn")
 
 
 class SalesAgent:
@@ -113,7 +114,10 @@ class SalesAgent:
         run = self.llm.run_agent(system=system, history=history, tools=session.tools(),
                                  max_steps=8)
         reply = run.final_text or "סליחה, משהו השתבש אצלי. אפשר לנסות שוב?"
-        return self._finish(tenant, session.conv, reply, run.tool_calls)
+        out = self._finish(tenant, session.conv, reply, run.tool_calls)
+        out.usage = {"input_tokens": run.input_tokens, "output_tokens": run.output_tokens,
+                     "latency_ms": run.latency_ms, "stopped_early": run.stopped_early}
+        return out
 
     def _finish(self, tenant: str, conv: Conversation, reply: str,
                 actions: list[dict]) -> AgentReply:

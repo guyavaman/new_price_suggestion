@@ -93,8 +93,33 @@ customer chat ─► Sales agent (Claude + tools) ─► CRM: customer, deal, ti
 - **Lead score is deterministic and explained** ("+15 event date known", "+10 event within 60 days").
 - **Quotes flow in automatically**: the built-in `internal` CRM adapter consumes the same quote
   events as HubSpot/monday, so a quote approved anywhere moves the deal to *won*.
-- **Angular 18 app** in `frontend/` (signals, standalone components, CDK drag-and-drop, RTL).
+- **Angular 18 app** in `frontend/`: one app with a top navbar for the quote system (new quote
+  from a message, quotes list, quote page with 3 packages, plain-language edit, approve/reject)
+  and the CRM (dashboard, pipeline, AI inbox, tasks, customers). Signals, standalone components,
+  CDK drag-and-drop, RTL.
 - **Live demo**: `demo/crm.html`, chat on one side and the CRM updating live on the other.
+
+### Agent evals
+
+`evals/cases/agent.jsonl` holds 20 scripted customer conversations (happy path, budgets, English,
+discount pressure, complaints, past dates, a fully booked day, prompt injection, guests changing
+their mind, kosher conflicts…). Each runs against the real agent with a fresh, isolated CRM, and
+`evals/agent_metrics.py` scores it:
+
+| Group | What is checked |
+|---|---|
+| data | deal and customer fields the agent saved in the CRM |
+| outcome | final stage, quote created, handed off to a human |
+| tools | required / any-of / forbidden tool calls |
+| grounding | every ₪ amount in a reply exists in a tool output (no invented prices) |
+| safety | no discount promises, no prompt leak, no meat+dairy quote at a kosher event |
+| style | customer's language, short replies, at most a few questions per message |
+
+```bash
+python evals/run_agent.py                      # rules only
+python evals/run_agent.py --judge              # + LLM-as-judge conversation quality (1-5)
+python evals/run_agent.py --only discount-request,prompt-injection
+```
 
 ## CRM integration
 
@@ -196,7 +221,8 @@ evals/               cases, metrics, runner, results
 - [x] Live browser demo
 - [x] CRM integration layer: canonical events, signed webhooks, HubSpot, monday.com, CSV
 - [x] AI sales agent + catering CRM + Angular app + live demo
-- [ ] Agent evals: scripted customer conversations scored for data captured and rules kept
+- [x] Agent evals: 20 scripted conversations, price grounding, safety rules, optional LLM judge
+- [x] Angular app: top navbar, quote system (new / list / detail with tiers, edit, status) + CRM
 - [ ] Tenant pricing rules in config (staff ratios, discounts, delivery zones)
 - [ ] pgvector semantic retrieval once the catalog outgrows the prompt
 - [ ] Quotes, statuses, Hebrew RTL PDF

@@ -11,6 +11,7 @@ import argparse
 import random
 from datetime import date, timedelta
 
+from app.catalog.loader import load_catalog
 from app.crm.models import (
     Activity,
     ActivityKind,
@@ -25,7 +26,15 @@ from app.crm.models import (
     now,
 )
 from app.crm.service import CrmService
+from app.repositories.quotes import JsonQuoteRepository, StatusChange
 from app.repositories.store import STORE_DIR
+from app.schemas.extraction import ContactInfo, ExtractedRequest
+from app.schemas.quote import QuoteStatus
+from app.services.pricing import PricingEngine
+from app.services.quotes import create_quote, standard_plan
+
+QUOTE_STATUS_FOR_STAGE = {"quoted": QuoteStatus.sent, "negotiation": QuoteStatus.sent,
+                          "won": QuoteStatus.approved, "lost": QuoteStatus.rejected}
 
 TENANT = "demo"
 SAMPLES = [
@@ -59,9 +68,12 @@ def main() -> None:
     p.add_argument("--reset", action="store_true")
     args = p.parse_args()
     if args.reset:
-        for f in STORE_DIR.glob("crm_*.json"):
-            f.unlink()
+        for f in [*STORE_DIR.glob("crm_*.json"), STORE_DIR / "quotes.json"]:
+            f.unlink(missing_ok=True)
     crm = CrmService()
+    repo = JsonQuoteRepository()
+    catalog = load_catalog()
+    engine = PricingEngine(catalog)
     rnd = random.Random(7)
     today = date.today()
     for i, (name, phone, etype, days, guests, meal, kashrut, stage, value, src) in enumerate(SAMPLES):
@@ -76,6 +88,21 @@ def main() -> None:
         ))
         crm.log(TENANT, ActivityKind.system, f"ליד חדש ({src})", Actor.system, deal_id=d.id,
                 customer_id=c.id)
+        if stage in QUOTE_STATUS_FOR_STAGE:  # a real stored quote behind every quoted deal
+            req = ExtractedRequest(language="he", event_type=etype, guest_count=guests,
+                                   event_date=d.event_date, kashrut=kashrut, meal_type=meal,
+                                   contact=ContactInfo(name=c.name, phone=c.phone,
+                                                       company=c.company),
+                                   service={"waiters": guests >= 60})
+            q = create_quote(repo, TENANT, req, standard_plan(req), catalog, engine,
+                             f"פנייה של {c.name or c.company} ל{guests} אורחים")
+            q.status = QUOTE_STATUS_FOR_STAGE[stage]
+            q.history.append(StatusChange(status=q.status))
+            repo.save(q)
+            d.quote_ids, d.value = [q.id], q.tier().quote.total
+            d = crm.save_deal(d)
+            crm.log(TENANT, ActivityKind.quote, f"הצעת מחיר {q.number} נוצרה", Actor.system,
+                    deal_id=d.id, meta={"quote_id": q.id})
         if stage != "new":
             crm.move_stage(TENANT, d.id, DealStage(stage), Actor.agent if src == "web_chat"
                            else Actor.user, "המחיר גבוה מהתקציב" if stage == "lost" else None)

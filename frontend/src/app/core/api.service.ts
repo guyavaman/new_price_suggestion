@@ -2,7 +2,8 @@ import { HttpClient, HttpInterceptorFn, HttpParams } from '@angular/common/http'
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
-  ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail, DealStage, Task,
+  ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail, DealStage, EditOut, QuoteOut, QuoteStatus,
+  StoredQuote, Task,
 } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
@@ -39,8 +40,15 @@ export class ApiService {
   addNote(id: string, text: string, kind = 'note') {
     return this.http.post(this.u(`/crm/deals/${id}/notes`), { text, kind });
   }
-  setQuoteStatus(quoteId: string, status: string, tier?: string) {
-    return this.http.post(this.u(`/quotes/${quoteId}/status`), { status, tier });
+  // ---------- quotes ----------
+  createQuote(message: string): Observable<QuoteOut> { return this.http.post<QuoteOut>(this.u('/quotes'), { message }); }
+  quotes(): Observable<StoredQuote[]> { return this.http.get<StoredQuote[]>(this.u('/quotes')); }
+  quote(id: string): Observable<StoredQuote> { return this.http.get<StoredQuote>(this.u(`/quotes/${id}`)); }
+  editQuote(id: string, instruction: string): Observable<EditOut> {
+    return this.http.post<EditOut>(this.u(`/quotes/${id}/edit`), { instruction });
+  }
+  setQuoteStatus(quoteId: string, status: QuoteStatus | string, tier?: string, note?: string): Observable<QuoteOut> {
+    return this.http.post<QuoteOut>(this.u(`/quotes/${quoteId}/status`), { status, tier, note });
   }
 
   customers(q?: string): Observable<Customer[]> {

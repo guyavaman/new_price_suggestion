@@ -34,6 +34,10 @@ button { cursor: pointer; }
 .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px clamp(14px, 3vw, 32px); background: var(--surface); border-bottom: 1px solid var(--line); }
 .top h1 { font-size: 1.4rem; color: var(--olive); }
 .top p { margin: 0; color: var(--muted); font-size: .9rem; }
+.demo-nav { display: flex; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.demo-nav a { text-decoration: none; color: var(--ink); padding: 4px 12px; border-radius: 999px; font-size: .88rem; font-weight: 600; }
+.demo-nav a:hover { color: var(--olive); }
+.demo-nav a.on { background: var(--olive); color: var(--surface); }
 .ghost { border: 1px solid var(--line); background: var(--surface); color: var(--olive); border-radius: 8px; padding: 5px 11px; font-weight: 600; font-size: .85rem; }
 .primary { border: 0; background: var(--olive); color: var(--surface); border-radius: 8px; padding: 8px 14px; font-weight: 700; }
 .primary:disabled { opacity: .55; cursor: progress; }
@@ -122,7 +126,10 @@ h3.sub { font-family: var(--body); font-size: .9rem; color: var(--muted); margin
 <body>
 <header class="top">
   <div><h1>זית ודבש · CRM + סוכן מכירות AI</h1><p>הלקוח מדבר עם הסוכן, וכל מה שהסוכן אוסף נכנס ל-CRM בזמן אמת.</p></div>
-  <button class="ghost" id="reset" type="button">איפוס הדמו</button>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <nav class="demo-nav" aria-label="דפי הדמו"><a href="index.html">הצעת מחיר</a><a class="on" href="crm.html" aria-current="page">CRM + סוכן מכירות</a></nav>
+    <button class="ghost" id="reset" type="button">איפוס הדמו</button>
+  </div>
 </header>
 <div class="wrap">
   <section class="phone" aria-label="צ'אט לקוח">

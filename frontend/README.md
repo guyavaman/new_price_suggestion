@@ -1,6 +1,7 @@
 # CRM frontend (Angular 18)
 
-Salesperson app for the catering CRM: dashboard, drag-and-drop pipeline, deal page (quotes,
+One app with a top navbar for the quote system (new quote from a customer message, quotes list,
+quote page with 3 packages, plain-language edit, approve/reject) and the catering CRM: dashboard, drag-and-drop pipeline, deal page (quotes,
 timeline, tasks, lead-score reasons, agent conversation), AI conversations inbox with human
 takeover, tasks, customers, and the customer-facing chat widget.
 

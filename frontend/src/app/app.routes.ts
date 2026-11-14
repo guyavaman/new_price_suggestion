@@ -2,6 +2,9 @@ import { Routes } from '@angular/router';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
+  { path: 'quotes/new', title: 'הצעה חדשה', loadComponent: () => import('./pages/quote-new.component').then((m) => m.QuoteNewComponent) },
+  { path: 'quotes/:id', title: 'הצעת מחיר', loadComponent: () => import('./pages/quote-detail.component').then((m) => m.QuoteDetailComponent) },
+  { path: 'quotes', title: 'הצעות מחיר', loadComponent: () => import('./pages/quotes-list.component').then((m) => m.QuotesListComponent) },
   { path: 'dashboard', title: 'דשבורד', loadComponent: () => import('./pages/dashboard.component').then((m) => m.DashboardComponent) },
   { path: 'pipeline', title: 'Pipeline', loadComponent: () => import('./pages/pipeline.component').then((m) => m.PipelineComponent) },
   { path: 'deals/:id', title: 'עסקה', loadComponent: () => import('./pages/deal-detail.component').then((m) => m.DealDetailComponent) },

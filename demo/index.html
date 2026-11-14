@@ -57,6 +57,10 @@ button { font: inherit; cursor: pointer; }
 .brand { display: flex; align-items: baseline; gap: 10px; }
 .brand h1 { font-size: 1.5rem; color: var(--olive); }
 .brand span { color: var(--muted); font-size: .95rem; }
+.demo-nav { display: flex; gap: 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.demo-nav a { text-decoration: none; color: var(--ink); padding: 4px 12px; border-radius: 999px; font-size: .88rem; font-weight: 600; }
+.demo-nav a:hover { color: var(--olive); }
+.demo-nav a.on { background: var(--olive); color: var(--surface); }
 .badge { font-size: .8rem; font-weight: 700; color: var(--olive); background: var(--olive-soft); border-radius: 999px; padding: 3px 10px; }
 
 .layout { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 24px; padding: 24px clamp(16px, 4vw, 40px) 48px; max-width: 1280px; margin: 0 auto; align-items: start; }
@@ -190,7 +194,7 @@ td.num, th.num { text-align: end; font-variant-numeric: tabular-nums; white-spac
 <body>
 <header class="topbar">
   <div class="brand"><h1>זית ודבש</h1><span>קייטרינג כשר לאירועים</span></div>
-  <span class="badge">דמו · AI Quote Agent</span>
+  <nav class="demo-nav" aria-label="דפי הדמו"><a class="on" href="index.html" aria-current="page">הצעת מחיר</a><a href="crm.html">CRM + סוכן מכירות</a></nav>
 </header>
 
 <main class="layout">
