@@ -26,15 +26,21 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       AI_DAILY_CALLS: "0"  # the app's daily cap is for the public site, not for evals
-      LLM_MODEL: ${{ inputs.model }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r backend/requirements-web.txt
+      - name: Model override
+        if: inputs.model != ''
+        run: echo "LLM_MODEL=${{ inputs.model }}" >> "$GITHUB_ENV"
       - name: Check the API key is set
-        run: test -n "$ANTHROPIC_API_KEY" || (echo "::error::Add the ANTHROPIC_API_KEY repository secret" && exit 1)
+        run: |
+          test -n "$ANTHROPIC_API_KEY" || (echo "::error::Add the ANTHROPIC_API_KEY repository secret" && exit 1)
+          K="$(printf %s "$ANTHROPIC_API_KEY" | tr -d '[:space:]')"
+          echo "key: ${#K} chars, starts with ${K:0:7}"  # prefix only, never the key
+          case "$K" in sk-ant-api*) ;; *) echo "::warning::This doesn't look like a Claude API key (expected sk-ant-api...)";; esac
       - name: Extraction evals (message -> structured request)
         run: |
           ONLY=""; [ "${{ inputs.suite }}" = "smoke" ] && ONLY="--only $SMOKE_EXTRACTION"
