@@ -50,4 +50,4 @@ tr.link { cursor: pointer; } tr.link:hover td { background: var(--bg); }
 @media print { app-root header.nav { display: none !important; } body { background: #fff; } }
 
 /* Latin references (Q-2026-1003, invoice numbers) inside Hebrew text: keep them LTR and apart */
-bdi.ref { unicode-bidi: isolate; direction: ltr; display: inline-block; margin-inline-start: .3em; font-variant-numeric: tabular-nums; }
+bdi.ref { unicode-bidi: isolate; direction: ltr; display: inline-block; margin: 0 .35em; font-variant-numeric: tabular-nums; }
