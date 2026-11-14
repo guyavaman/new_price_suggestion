@@ -16,7 +16,7 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
     @if (q(); as q) {
       <div class="page-head">
         <div>
-          <h1>הצעת מחיר {{ q.number }}</h1>
+          <h1>הצעת מחיר <bdi class="ref">{{ q.number }}</bdi></h1>
           <p><span class="pill">{{ status[q.status] }}</span> נוצרה {{ q.created_at | heDate: true }}
             @if (dealId()) { · <a [routerLink]="['/deals', dealId()]">לעסקה ב-CRM ←</a> }</p>
         </div>
@@ -92,11 +92,16 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
       <div class="cols">
         <section class="card">
           <h2>שינוי בשפה חופשית <span class="pill ai">Claude + כלים</span></h2>
-          <form class="edit" (ngSubmit)="edit()">
-            <input name="ins" [(ngModel)]="instruction" placeholder="למשל: תחליף את השיפודים בסושי ותעלה ל-130 אורחים" aria-label="שינוי">
-            <button class="btn" [disabled]="editing() || !instruction.trim() || q.status === 'approved'">{{ editing() ? 'מעדכן…' : 'עדכן' }}</button>
-          </form>
-          <div class="examples">@for (e of editExamples; track e) { <button type="button" class="chip" (click)="instruction = e">{{ e }}</button> }</div>
+          @if (q.status === 'approved') {
+            <p class="locked">הלקוח כבר אישר את ההצעה ושילם מקדמה, ולכן היא נעולה לשינויים: המחיר שהוא אישר לא משתנה בלי ידיעתו.
+              את מספר האורחים הסופי הלקוח מעדכן בעצמו מהקישור שלו (עד יומיים לפני האירוע). לשינוי אחר, צרו הצעה חדשה מעמוד העסקה.</p>
+          } @else {
+            <form class="edit" (ngSubmit)="edit()">
+              <input name="ins" [(ngModel)]="instruction" placeholder="למשל: תחליף את השיפודים בסושי ותעלה ל-130 אורחים" aria-label="שינוי">
+              <button class="btn" [disabled]="editing() || !instruction.trim()">{{ editing() ? 'מעדכן…' : 'עדכן' }}</button>
+            </form>
+            <div class="examples">@for (e of editExamples; track e) { <button type="button" class="chip" (click)="instruction = e">{{ e }}</button> }</div>
+          }
           @if (lastEdit(); as r) {
             @if (r.reply) { <p class="reply">{{ r.reply }}</p> }
             @if (r.flags.length) { <div class="warnbox"><b>הועבר לטיפולך:</b> {{ r.flags.join(' · ') }}</div> }
@@ -144,6 +149,7 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
     .cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; margin-top: 14px; align-items: start; }
     @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
     h2 { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .locked { margin: 0; padding: 12px 14px; border-radius: 8px; background: var(--honey-soft); color: var(--ink); line-height: 1.6; }
     .edit { display: flex; gap: 6px; } .edit input { flex: 1; min-width: 0; }
     .examples { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 2px 10px; font-size: .82rem; }

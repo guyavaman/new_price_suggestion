@@ -48,3 +48,6 @@ tr.link { cursor: pointer; } tr.link:hover td { background: var(--bg); }
 .temp-cold { background: #e6edf3; color: #3f6283; }
 .stage-completed { --st: #5b6b8c; }
 @media print { app-root header.nav { display: none !important; } body { background: #fff; } }
+
+/* Latin references (Q-2026-1003, invoice numbers) inside Hebrew text: keep them LTR and apart */
+bdi.ref { unicode-bidi: isolate; direction: ltr; display: inline-block; margin-inline-start: .3em; font-variant-numeric: tabular-nums; }

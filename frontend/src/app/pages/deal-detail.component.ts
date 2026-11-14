@@ -86,7 +86,7 @@ import { BusinessSettings, DealDetail, DealStage } from '../core/models';
 
             <h3>חשבונית</h3>
             @if (x.deal.invoice; as inv) {
-              <p>חשבונית <b>{{ inv.number }}</b> · {{ inv.amount | ils }} · {{ inv.issued_at | heDate }} @if (inv.url) { · <a [href]="inv.url" target="_blank" rel="noopener">פתיחה</a> }</p>
+              <p>חשבונית <b><bdi class="ref">{{ inv.number }}</bdi></b> · {{ inv.amount | ils }} · {{ inv.issued_at | heDate }} @if (inv.url) { · <a [href]="inv.url" target="_blank" rel="noopener">פתיחה</a> }</p>
             } @else if (x.deal.stage === 'won' || x.deal.stage === 'completed') {
               <form class="inv" (ngSubmit)="invoice()">
                 @if (settings()?.invoice_provider !== 'morning') {

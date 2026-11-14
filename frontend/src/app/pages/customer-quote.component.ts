@@ -15,7 +15,7 @@ import { PublicQuote } from '../core/models';
       @if (error()) { <div class="err">{{ error() }}</div> }
       @if (q(); as q) {
         <header>
-          <div><b class="biz">{{ q.business_name }}</b><span class="muted">הצעת מחיר {{ q.number }}</span></div>
+          <div><b class="biz">{{ q.business_name }}</b><span class="muted">הצעת מחיר <bdi class="ref">{{ q.number }}</bdi></span></div>
           <a [href]="'tel:' + q.business_phone" class="muted" dir="ltr">{{ q.business_phone }}</a>
         </header>
         <h1>{{ q.customer_name ? 'שלום ' + q.customer_name + ',' : 'שלום,' }} הנה ההצעה ל{{ q.event.type }}</h1>

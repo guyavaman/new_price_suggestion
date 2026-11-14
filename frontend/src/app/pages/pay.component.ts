@@ -13,7 +13,7 @@ import { IlsPipe } from '../core/format';
       <span class="tag">דף תשלום לדוגמה · לא מתבצע חיוב</span>
       @if (info(); as i) {
         <h1>תשלום מקדמה</h1>
-        <p>{{ i.business_name }} · הצעה {{ i.quote_number }} · חבילת {{ i.tier }}</p>
+        <p>{{ i.business_name }} · הצעה <bdi class="ref">{{ i.quote_number }}</bdi> · חבילת {{ i.tier }}</p>
         <b class="amount num">{{ i.amount | ils: 2 }}</b>
         @if (i.status === 'paid') { <p class="ok">שולם ✓</p> }
         @else {
