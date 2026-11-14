@@ -6,7 +6,7 @@ Approval + paid deposit is the moment the deal is really won, so that is what mo
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel
 
@@ -42,11 +42,21 @@ class PublicTier(BaseModel):
     deposit: float
     items: list[dict]  # name, quantity, unit (no internal prices or SKUs)
     services: list[str]  # staff, delivery etc. as plain text
+    # breakdown for the printable quote
+    subtotal: float = 0
+    discount_rate: float = 0
+    discount: float = 0
+    net: float = 0
+    vat: float = 0
 
 
 class PublicQuote(BaseModel):
     business_name: str
     business_phone: str
+    business_email: str = ""
+    business_id: str = ""
+    vat_rate: float = 0.18
+    created_at: datetime | None = None
     number: str
     status: str
     customer_name: str | None
@@ -111,11 +121,15 @@ class CustomerPortal:
                     items.append({"name": ln.name_he, "quantity": ln.quantity, "unit": ln.unit})
             tiers.append(PublicTier(key=t.key, name=t.name, total=t.quote.total,
                                     per_guest=t.quote.per_guest, items=items, services=services,
-                                    deposit=round(t.quote.total * rules.deposit_rate, 2)))
+                                    deposit=round(t.quote.total * rules.deposit_rate, 2),
+                                    subtotal=t.quote.subtotal, discount_rate=t.quote.discount_rate,
+                                    discount=t.quote.discount, net=t.quote.net, vat=t.quote.vat))
         r = q.request
         event_date = r.event_date
         return PublicQuote(
-            business_name=rules.business_name, business_phone=rules.phone, number=q.number,
+            business_name=rules.business_name, business_phone=rules.phone,
+            business_email=rules.email, business_id=rules.business_id, vat_rate=rules.vat_rate,
+            created_at=q.created_at, number=q.number,
             status=q.status.value, customer_name=r.contact.name,
             event={"type": EVENT_TYPE_HE.get(r.event_type.value if r.event_type else "other"),
                    "date": event_date, "guests": r.guest_count, "location": r.location,

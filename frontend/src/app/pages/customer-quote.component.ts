@@ -16,7 +16,10 @@ import { PublicQuote, ServiceChat } from '../core/models';
       @if (q(); as q) {
         <header>
           <div><b class="biz">{{ q.business_name }}</b><span class="muted">הצעת מחיר <bdi class="ref">{{ q.number }}</bdi></span></div>
-          <a [href]="'tel:' + q.business_phone" class="muted" dir="ltr">{{ q.business_phone }}</a>
+          <div class="head-links">
+            <a [href]="'/print/' + token()" target="_blank" rel="noopener" class="muted">הורדת PDF</a>
+            <a [href]="'tel:' + q.business_phone" class="muted" dir="ltr">{{ q.business_phone }}</a>
+          </div>
         </header>
         <h1>{{ q.customer_name ? 'שלום ' + q.customer_name + ',' : 'שלום,' }} הנה ההצעה ל{{ q.event.type }}</h1>
         <p class="ev">{{ q.event.date | heDate }} · {{ q.final_guest_count ?? q.event.guests }} אורחים
@@ -113,7 +116,7 @@ import { PublicQuote, ServiceChat } from '../core/models';
 
     .wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; }
     header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--olive); padding-bottom: 10px; margin-bottom: 18px; }
-    header div { display: grid; } .biz { font-family: var(--display); font-size: 1.5rem; color: var(--olive); }
+    header div { display: grid; } header .head-links { display: flex; gap: 14px; } .biz { font-family: var(--display); font-size: 1.5rem; color: var(--olive); }
     h1 { font-size: 1.6rem; margin-bottom: 4px; } .ev { color: var(--muted); margin: 0 0 12px; }
     .note { background: var(--olive-soft); border-radius: 10px; padding: 12px 14px; }
     .done { background: var(--ok-soft); color: var(--ok); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }

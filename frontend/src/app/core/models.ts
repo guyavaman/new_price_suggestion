@@ -196,10 +196,12 @@ export interface BusinessSettings {
   invoice_provider: string; service_info: string;
 }
 export interface PublicQuote {
-  business_name: string; business_phone: string; number: string; status: string; customer_name: string | null;
+  business_name: string; business_phone: string; business_email?: string; business_id?: string; vat_rate?: number; created_at?: string | null;
+  number: string; status: string; customer_name: string | null;
   event: { type: string; date: string | null; guests: number | null; location: string | null; meal_type: string | null; kashrut: string | null };
   cover_note: string | null;
-  tiers: { key: string; name: string; total: number; per_guest: number | null; deposit: number; items: { name: string; quantity: number; unit: string }[]; services: string[] }[];
+  tiers: { key: string; name: string; total: number; per_guest: number | null; deposit: number; items: { name: string; quantity: number; unit: string }[]; services: string[];
+    subtotal?: number; discount_rate?: number; discount?: number; net?: number; vat?: number }[];
   selected_tier: string; valid_until: string; expired: boolean; deposit_rate: number; deposit_paid: number;
   can_accept: boolean; can_update_count: boolean; final_guest_count: number | null;
 }

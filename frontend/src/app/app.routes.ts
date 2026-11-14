@@ -23,6 +23,7 @@ export const routes: Routes = [
   // customer-facing, no navigation bar
   { path: 'login', ...page('כניסה', () => import('./pages/login.component').then((m) => m.LoginComponent), { public: true }) },
   { path: 'q/:token', ...page('הצעת מחיר', () => import('./pages/customer-quote.component').then((m) => m.CustomerQuoteComponent), { public: true }) },
+  { path: 'print/:token', ...page('הצעת מחיר להדפסה', () => import('./pages/print-quote.component').then((m) => m.PrintQuoteComponent), { public: true }) },
   { path: 'pay/:id', ...page('תשלום', () => import('./pages/pay.component').then((m) => m.PayComponent), { public: true }) },
   // old links
   { path: 'dashboard', redirectTo: 'today' }, { path: 'pipeline', redirectTo: 'events' }, { path: 'conversations', redirectTo: 'inbox' },
