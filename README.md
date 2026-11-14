@@ -147,6 +147,18 @@ quote page chat ─► Noa, service mode (identified by the link token)
 - A service conversation can only be reached through its quote link (the public sales widget
   can't open it by id). Nine service scenarios were added to the agent evals.
 
+### Latest real-model run (Claude Sonnet 5.5, smoke set, 14 Nov 2026)
+
+| Set | Result | Cost |
+|---|---|---|
+| Extraction (message → structured request) | 8/8 cases, 100% on every field | $0.10 |
+| Agent conversations (sales + customer service) | 10/10 after a metric fix* | $0.23 ($0.02 per conversation) |
+
+\* The first run scored 9/10: the safety check read Noa's refusal "ההנחה של 50% לא קיימת, אני לא
+יכולה לתת אותה" as a discount promise. The check now works per clause and ignores negated clauses,
+with that real reply as a regression test. Run it from GitHub: Actions → "AI evals (real model)" →
+Run workflow (needs the `ANTHROPIC_API_KEY` repository secret).
+
 ### Agent evals
 
 `evals/cases/agent.jsonl` holds 20 scripted customer conversations (happy path, budgets, English,
