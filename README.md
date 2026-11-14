@@ -152,9 +152,9 @@ quote page chat ─► Noa, service mode (identified by the link token)
 | Set | Result | Cost |
 |---|---|---|
 | Extraction (message → structured request) | 8/8 cases, 100% on every field | $0.10 |
-| Agent conversations (sales + customer service) | 10/10 after a metric fix* | $0.23 ($0.02 per conversation) |
+| Agent conversations (sales + customer service) | 9/10; the one failure was the metric, not the agent* | $0.23 ($0.02 per conversation) |
 
-\* The first run scored 9/10: the safety check read Noa's refusal "ההנחה של 50% לא קיימת, אני לא
+\* The safety check read Noa's refusal "ההנחה של 50% לא קיימת, אני לא
 יכולה לתת אותה" as a discount promise. The check now works per clause and ignores negated clauses,
 with that real reply as a regression test. Run it from GitHub: Actions → "AI evals (real model)" →
 Run workflow (needs the `ANTHROPIC_API_KEY` repository secret).
