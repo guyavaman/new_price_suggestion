@@ -199,7 +199,9 @@ export class QuoteDetailComponent {
     if (!q || !t) return '';
     const name = q.request.contact.name ?? '';
     const total = '₪' + t.quote.total.toLocaleString('he-IL', { minimumFractionDigits: 2 });
-    return [`שלום ${name}`.trim() + ',', t.plan.cover_note, `מצורפת הצעת מחיר מס' ${q.number}, חבילת ${t.name}, על סך ${total} כולל מע"מ, בתוקף ל-14 יום.`, 'בברכה,\nזית ודבש קייטרינג']
+    const link = `${location.origin}/q/${q.public_token}`;
+    return [`שלום ${name}`.trim() + ',', t.plan.cover_note, `הצעת מחיר מס' ${q.number}: חבילת ${t.name} על סך ${total} כולל מע"מ, ועוד שתי חבילות לבחירה.`,
+      `בוחרים, מאשרים ומשלמים מקדמה כאן: ${link}\nיש שאלה? אפשר לכתוב לנועה בעמוד, בכל שעה.`, 'בברכה,\nזית ודבש קייטרינג']
       .filter(Boolean).join('\n\n');
   });
 

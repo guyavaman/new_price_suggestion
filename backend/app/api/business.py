@@ -7,6 +7,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.business.messages import CustomerMessage, customer_messages
 from app.business.operations import (
     AutomationAction,
     CalendarDay,
@@ -15,13 +16,14 @@ from app.business.operations import (
     TodayView,
     issue_invoice,
     kitchen_sheet,
+    latest_quote,
     month_calendar,
     run_automation,
     today_view,
 )
 from app.business.settings import BusinessSettings, SettingsService
 from app.catalog.service import CatalogService, TenantCatalogItem
-from app.crm.models import Deal
+from app.crm.models import ActivityKind, Actor, Deal
 from app.crm.service import CrmService
 from app.deps import get_catalog_service, get_crm, get_repo, get_settings_service, get_tenant
 from app.integrations.config import TenantConfig
@@ -132,3 +134,39 @@ def invoice(deal_id: str, body: InvoiceIn, t: TenantConfig = Depends(get_tenant)
         return issue_invoice(crm, repo, s.get(t.tenant_id), t.tenant_id, deal_id, body.number)
     except InvoiceError as e:
         raise HTTPException(409, str(e)) from e
+
+
+
+# ---------- ready-to-send customer messages (with the personal link) ----------
+
+def _deal_ctx(t, deal_id, crm, repo):
+    deal = crm.deals.get(t.tenant_id, deal_id)
+    if deal is None:
+        raise HTTPException(404, "Deal not found")
+    cust = crm.customers.get(t.tenant_id, deal.customer_id)
+    return deal, latest_quote(repo, deal), cust
+
+
+@router.get("/crm/deals/{deal_id}/messages", response_model=list[CustomerMessage])
+def deal_messages(deal_id: str, t: TenantConfig = Depends(get_tenant),
+                  crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                  s: SettingsService = Depends(get_settings_service)):
+    deal, q, cust = _deal_ctx(t, deal_id, crm, repo)
+    return customer_messages(deal, q, cust, s.get(t.tenant_id))
+
+
+@router.post("/crm/deals/{deal_id}/messages/{kind}/sent", response_model=Deal)
+def message_sent(deal_id: str, kind: str, t: TenantConfig = Depends(get_tenant),
+                 crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                 s: SettingsService = Depends(get_settings_service)):
+    """The owner sent a message from their phone: keep it on the timeline."""
+    deal, q, cust = _deal_ctx(t, deal_id, crm, repo)
+    msg = next((m for m in customer_messages(deal, q, cust, s.get(t.tenant_id))
+                if m.kind == kind), None)
+    if msg is None:
+        raise HTTPException(404, "Unknown message")
+    deal.sent_messages[kind] = date.today().isoformat()
+    deal = crm.save_deal(deal)
+    crm.log(t.tenant_id, ActivityKind.note, f"נשלחה הודעה ללקוח: {msg.label}", Actor.user,
+            deal_id=deal.id, meta={"message": kind})
+    return deal

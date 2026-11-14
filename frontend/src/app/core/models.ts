@@ -46,6 +46,7 @@ export interface Deal {
   created_at: string;
   updated_at: string;
   stage_changed_at: string;
+  sent_messages?: Record<string, string>;
 }
 
 export interface Activity {
@@ -160,6 +161,7 @@ export interface ExtractedRequest {
 }
 export type QuoteStatus = 'draft' | 'sent' | 'approved' | 'rejected' | 'expired';
 export interface StoredQuote {
+  public_token: string;
   id: string; number: string; status: QuoteStatus; selected_tier: string; source_message: string;
   request: ExtractedRequest; tiers: TierQuote[]; created_at: string; updated_at: string;
   history: { status: QuoteStatus; at: string; note: string | null }[];
@@ -203,3 +205,5 @@ export interface PublicQuote {
 }
 
 export interface ServiceChat { status: Conversation['status'] | null; messages: { role: 'user' | 'assistant'; text: string; by: string }[]; reply?: string | null; }
+
+export interface CustomerMessage { kind: string; label: string; text: string; recommended: boolean; whatsapp_url: string | null; }

@@ -275,3 +275,49 @@ def test_owner_rejection_note_becomes_lost_reason(env):
     q = env["repo"].save(q)
     env["sync"].deliver(env["tenant"], q, EventType.rejected)
     assert env["crm"].deals.get(T, deal.id).lost_reason == "בחרו ספק אחר"
+
+
+# ---------- ready-to-send customer messages ----------
+
+def test_customer_messages_follow_the_deal(env):
+    from app.business.messages import customer_messages
+    q, deal = make_quote(env)
+    rules = env["settings"].get(T)
+    cust = env["crm"].customers.get(T, deal.customer_id)
+    msgs = customer_messages(env["crm"].deals.get(T, deal.id), q, cust, rules)
+    assert msgs[0].kind == "quote" and msgs[0].recommended
+    link = f"/q/{q.public_token}"
+    assert all(link in m.text for m in msgs)  # every message carries the personal link
+    assert msgs[0].whatsapp_url.startswith("https://wa.me/972501234567?text=")
+
+    r = env["portal"].accept(q.public_token, "recommended")
+    env["portal"].confirm_payment(q.public_token, r["payment_id"])
+    d = env["crm"].deals.get(T, deal.id)
+    q = env["repo"].get(T, q.id)
+    msgs = customer_messages(d, q, cust, rules)
+    kinds = [m.kind for m in msgs]
+    assert msgs[0].kind == "confirmed" and "quote" not in kinds
+    assert {"final_count", "balance", "service"} <= set(kinds)
+    balance = next(m for m in msgs if m.kind == "balance")
+    assert f"₪{q.tier().quote.total - d.deposit_paid:,.0f}" in balance.text
+
+
+def test_message_sent_is_logged(env):
+    from app import deps
+    q, deal = make_quote(env)
+    app.dependency_overrides.update({
+        deps.get_crm: lambda: env["crm"], deps.get_repo: lambda: env["repo"],
+        deps.get_settings_service: lambda: env["settings"],
+        deps.get_tenant_loader: lambda: (lambda tid: env["tenant"]),
+    })
+    try:
+        c = TestClient(app)
+        h = {"X-Tenant-ID": T}
+        msgs = c.get(f"/crm/deals/{deal.id}/messages", headers=h).json()
+        assert msgs[0]["kind"] == "quote"
+        d = c.post(f"/crm/deals/{deal.id}/messages/quote/sent", headers=h).json()
+        assert "quote" in d["sent_messages"]
+        assert any("שליחת ההצעה" in a.text for a in env["crm"].timeline(T, deal.id))
+        assert c.post(f"/crm/deals/{deal.id}/messages/nope/sent", headers=h).status_code == 404
+    finally:
+        app.dependency_overrides.clear()

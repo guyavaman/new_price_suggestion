@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 import httpx
 from pydantic import BaseModel, Field
 
+from app.business.messages import final_count_text, followup_text
 from app.business.settings import BusinessSettings
 from app.catalog.service import TenantCatalogItem
 from app.crm.models import ActivityKind, Actor, Deal, DealStage, Invoice, now
@@ -181,9 +182,8 @@ def run_automation(crm: CrmService, repo, rules: BusinessSettings, tenant: str,
                 act(d, "expired", f"ההצעה {q.number} פגה. להתקשר ולחדש?",
                     f"הצעה {q.number} פגה אחרי {rules.quote_valid_days} ימים")
             elif age >= rules.followup_after_days and "followup" not in d.automation:
-                msg = (f"היי, רציתי לוודא שההצעה הגיעה 🙂 אפשר לבחור חבילה ולאשר כאן: {link} "
-                       "ואם משהו לא מתאים, נשמח להתאים.")
-                act(d, "followup", f"מעקב: ההצעה לא נענתה {age} ימים",
+                msg = followup_text(link)
+                act(d, "followup", f"מעקב: ההצעה לא נענתה {age} ימים (הודעה מוכנה בעמוד האירוע)",
                     f"הודעת מעקב מוצעת ללקוח: {msg}", priority="high" if d.lead_score >= 70
                     else "normal")
 
@@ -191,8 +191,8 @@ def run_automation(crm: CrmService, repo, rules: BusinessSettings, tenant: str,
             days_left = (d.event_date - today).days
             if (2 <= days_left <= rules.final_count_days_before and d.final_guest_count is None
                     and "final_count" not in d.automation):
-                msg = (f"היי! האירוע מתקרב 🎉 אפשר לאשר מספר אורחים סופי עד יומיים לפני: {link}")
-                act(d, "final_count", "לבקש אישור מספר אורחים סופי",
+                msg = final_count_text(link, d.event_date - timedelta(days=2))
+                act(d, "final_count", "לבקש אישור מספר אורחים סופי (הודעה מוכנה בעמוד האירוע)",
                     f"בקשת אישור מספר אורחים: {msg}", due_hours=2)
             if days_left < 0 and "completed" not in d.automation:
                 crm.move_stage(tenant, d.id, DealStage.completed, Actor.system)

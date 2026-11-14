@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe, RelativePipe } from '../core/format';
 import { ACTOR, EVENT_TYPE, KASHRUT, MEAL, QUOTE_STATUS, REJECT_REASONS, SOURCE, STAGES, TEMP, dietLabel } from '../core/labels';
-import { BusinessSettings, DealDetail, DealStage } from '../core/models';
+import { BusinessSettings, CustomerMessage, DealDetail, DealStage } from '../core/models';
 
 @Component({
   selector: 'app-deal-detail',
@@ -115,6 +115,24 @@ import { BusinessSettings, DealDetail, DealStage } from '../core/models';
         </div>
 
         <aside class="grid">
+          @if (messages().length) {
+            <section class="card msg">
+              <h2>הודעה ללקוח</h2>
+              <div class="chips">
+                @for (m of messages(); track m.kind) {
+                  <button type="button" class="chip" [class.on]="m.kind === pickedKind()" (click)="pickMessage(m)">
+                    {{ m.label }}@if (m.recommended) { <span class="rec">מומלץ</span> }@if (x.deal.sent_messages?.[m.kind]) { ✓ }
+                  </button>
+                }
+              </div>
+              <textarea name="mt" rows="6" [(ngModel)]="messageText" aria-label="נוסח ההודעה"></textarea>
+              <div class="msg-actions">
+                @if (waBase()) { <a class="btn" [href]="waHref()" target="_blank" rel="noopener" (click)="markSent()">שליחה בוואטסאפ</a> }
+                <button type="button" class="btn ghost" (click)="copyMessage()">{{ msgCopied() ? 'הועתק ✓' : 'העתקה' }}</button>
+              </div>
+              <p class="muted small">כל הודעה כוללת את הקישור האישי של הלקוח: שם הוא מאשר, משלם, מעדכן אורחים ושואל את נועה.</p>
+            </section>
+          }
           <section class="card">
             <h2>לקוח</h2>
             @if (x.customer; as c) {
@@ -158,6 +176,11 @@ import { BusinessSettings, DealDetail, DealStage } from '../core/models';
     .st.on { background: var(--st); border-color: var(--st); color: #fff; font-weight: 700; }
     .lostbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
     .lostbox input { flex: 1; min-width: 200px; }
+    .msg { display: grid; gap: 10px; } .msg .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .msg textarea { width: 100%; box-sizing: border-box; line-height: 1.55; resize: vertical; }
+    .msg-actions { display: flex; gap: 8px; } .msg-actions a.btn { text-decoration: none; }
+    .chip.on { background: var(--olive-soft); border-color: var(--olive); }
+    .rec { margin-inline-start: 4px; font-size: .72rem; background: var(--honey-soft); color: #8a5c06; border-radius: 99px; padding: 0 6px; }
     .reason-chips { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
     .layout { display: grid; grid-template-columns: 1fr 320px; gap: 14px; align-items: start; }
     @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
@@ -203,6 +226,18 @@ export class DealDetailComponent {
   stages = STAGES; meal = MEAL; kashrut = KASHRUT; eventType = EVENT_TYPE; source = SOURCE; actor = ACTOR;
   temp = TEMP; qStatus = QUOTE_STATUS;
   note = ''; noteKind = 'note'; task = ''; invoiceNumber = ''; lostReason = ''; reasons = REJECT_REASONS;
+  messages = signal<CustomerMessage[]>([]);
+  pickedKind = signal('');
+  messageText = '';
+  msgCopied = signal(false);
+  waBase = computed(() => this.messages().find((m) => m.whatsapp_url)?.whatsapp_url?.split('?')[0] ?? null);
+  waHref() { return `${this.waBase()}?text=${encodeURIComponent(this.messageText)}`; }
+  pickMessage(m: CustomerMessage) { this.pickedKind.set(m.kind); this.messageText = m.text; }
+  markSent() { const k = this.pickedKind(); if (k) this.api.messageSent(this.id(), k).subscribe(() => this.load()); }
+  async copyMessage() {
+    try { await navigator.clipboard.writeText(this.messageText); this.msgCopied.set(true); setTimeout(() => this.msgCopied.set(false), 2000); } catch { /* blocked */ }
+    this.markSent();
+  }
   quote = computed(() => { const q = this.x()?.quotes ?? []; return q[q.length - 1] ?? null; });
 
   constructor() {
@@ -211,6 +246,11 @@ export class DealDetailComponent {
   }
   load(id = this.id()) {
     this.api.deal(id).subscribe({ next: (x) => this.x.set(x), error: () => this.error.set('האירוע לא נמצא או שהשרת לא זמין') });
+    this.api.dealMessages(id).subscribe((ms) => {
+      this.messages.set(ms);
+      const keep = ms.find((m) => m.kind === this.pickedKind());
+      if (!keep && ms.length) this.pickMessage(ms[0]);
+    });
   }
   customerLink(token: string) { return `${this.settings()?.public_base_url ?? location.origin}/q/${token}`; }
   async copyLink(token: string) {

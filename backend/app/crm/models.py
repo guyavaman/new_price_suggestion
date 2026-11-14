@@ -113,6 +113,7 @@ class Deal(BaseModel):
     payments: list[Payment] = Field(default_factory=list)
     invoice: Invoice | None = None
     automation: dict[str, str] = Field(default_factory=dict, description="rule -> date it ran")
+    sent_messages: dict[str, str] = Field(default_factory=dict)  # message kind -> date sent
     owner: str | None = None
     lost_reason: str | None = None
     source: Source = Source.manual

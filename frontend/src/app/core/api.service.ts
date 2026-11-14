@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -32,6 +32,8 @@ export class ApiService {
     if (q) params = params.set('q', q);
     return this.http.get<Deal[]>(this.u('/crm/deals'), { params });
   }
+  dealMessages(id: string): Observable<CustomerMessage[]> { return this.http.get<CustomerMessage[]>(this.u(`/crm/deals/${id}/messages`)); }
+  messageSent(id: string, kind: string): Observable<unknown> { return this.http.post(this.u(`/crm/deals/${id}/messages/${kind}/sent`), {}); }
   deal(id: string): Observable<DealDetail> { return this.http.get<DealDetail>(this.u(`/crm/deals/${id}`)); }
   createDeal(body: unknown): Observable<Deal> { return this.http.post<Deal>(this.u('/crm/deals'), body); }
   setStage(id: string, stage: DealStage, reason?: string): Observable<Deal> {
