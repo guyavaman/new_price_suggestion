@@ -13,8 +13,7 @@ WORKDIR /app
 COPY backend/requirements-web.txt backend/
 RUN pip install --no-cache-dir -r backend/requirements-web.txt
 COPY backend/ backend/
-COPY data/catalog.jsonl data/catalog.jsonl
-COPY data/tenants/ data/tenants/
+COPY data/ data/
 COPY --from=web /web/dist/crm/browser /app/frontend/dist/crm/browser
 WORKDIR /app/backend
 EXPOSE 8000
