@@ -2,8 +2,8 @@ import { HttpClient, HttpInterceptorFn, HttpParams } from '@angular/common/http'
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
-  ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail, DealStage, EditOut, QuoteOut, QuoteStatus,
-  StoredQuote, Task,
+  BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView,
 } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
@@ -76,6 +76,29 @@ export class ApiService {
   resumeAi(id: string): Observable<Conversation> {
     return this.http.post<Conversation>(this.u(`/crm/conversations/${id}/resume`), {});
   }
+
+  // ---------- owner screens ----------
+  today(): Observable<TodayView> { return this.http.get<TodayView>(this.u('/crm/today')); }
+  calendar(month: string): Observable<CalendarDay[]> { return this.http.get<CalendarDay[]>(this.u('/crm/calendar'), { params: { month } }); }
+  kitchen(day: string): Observable<KitchenSheet> { return this.http.get<KitchenSheet>(this.u('/kitchen'), { params: { day } }); }
+  catalog(): Observable<CatalogItem[]> { return this.http.get<CatalogItem[]>(this.u('/catalog')); }
+  addItem(item: Partial<CatalogItem>): Observable<CatalogItem> { return this.http.post<CatalogItem>(this.u('/catalog'), item); }
+  patchItem(sku: string, patch: Partial<CatalogItem>): Observable<CatalogItem> { return this.http.patch<CatalogItem>(this.u(`/catalog/${sku}`), patch); }
+  settings(): Observable<BusinessSettings> { return this.http.get<BusinessSettings>(this.u('/settings')); }
+  saveSettings(patch: Partial<BusinessSettings>): Observable<BusinessSettings> { return this.http.patch<BusinessSettings>(this.u('/settings'), patch); }
+  invoice(dealId: string, number?: string): Observable<Deal> { return this.http.post<Deal>(this.u(`/crm/deals/${dealId}/invoice`), { number: number ?? null }); }
+  runAutomation(): Observable<{ rule: string; deal_id: string; title: string }[]> { return this.http.post<{ rule: string; deal_id: string; title: string }[]>(this.u('/automation/run'), {}); }
+
+  // ---------- customer page (public, token based) ----------
+  publicQuote(token: string): Observable<PublicQuote> { return this.http.get<PublicQuote>(this.u(`/public/quotes/${token}`)); }
+  acceptQuote(token: string, tier: string): Observable<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }> {
+    return this.http.post<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }>(this.u(`/public/quotes/${token}/accept`), { tier });
+  }
+  updateGuestCount(token: string, guests: number): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/guest-count`), { guests }); }
+  paymentInfo(token: string, id: string): Observable<{ amount: number; status: string; business_name: string; quote_number: string; tier: string }> {
+    return this.http.get<{ amount: number; status: string; business_name: string; quote_number: string; tier: string }>(this.u(`/public/quotes/${token}/payments/${id}`));
+  }
+  demoConfirm(token: string, id: string) { return this.http.post(this.u(`/public/quotes/${token}/payments/${id}/demo-confirm`), {}); }
 
   chat(message: string, conversationId?: string | null): Observable<ChatReply> {
     return this.http.post<ChatReply>(this.u('/agent/chat'), { message, conversation_id: conversationId ?? null });

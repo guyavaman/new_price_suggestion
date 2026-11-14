@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, RelativePipe } from '../core/format';
 import { Conversation } from '../core/models';
@@ -11,13 +11,22 @@ import { Conversation } from '../core/models';
   imports: [FormsModule, RouterLink, HeDatePipe, RelativePipe],
   template: `
     <div class="page-head">
-      <div><h1>שיחות סוכן AI</h1><p>כל השיחות מהצ'אט באתר. שיחות שהועברו לנציג מחכות לתשובה שלכם.</p></div>
+      <div><h1>פניות</h1><p>נועה עונה לכל פנייה בצ'אט. כאן רואים הכל, ונכנסים לשיחה כשצריך.</p></div>
       <div class="filters" role="group" aria-label="סינון">
         @for (f of filters; track f.key) {
           <button class="btn" [class.ghost]="filter() !== f.key" (click)="setFilter(f.key)">{{ f.label }}</button>
         }
       </div>
     </div>
+    <details class="card manual" [open]="manualOpen()">
+      <summary>+ פנייה שהגיעה במייל או בטלפון? הדביקו אותה כאן וקבלו הצעת מחיר</summary>
+      <form (ngSubmit)="fromMessage()">
+        <textarea name="m" rows="4" [(ngModel)]="manual" placeholder="למשל: שלום, בר מצווה ל-120 איש ב-3.12, בשרי כשר. מיכל 050-1234567" aria-label="הודעת הלקוח"></textarea>
+        <div class="mrow"><button class="btn" [disabled]="creating() || !manual.trim()">{{ creating() ? 'יוצר הצעה…' : 'צור הצעת מחיר' }}</button>
+          <span class="muted">AI מחלץ פרטים ובונה תפריט, הקוד מתמחר 3 חבילות, והאירוע נפתח אוטומטית</span></div>
+        @if (manualErr()) { <div class="err">{{ manualErr() }}</div> }
+      </form>
+    </details>
     <div class="inbox">
       <ul class="list card">
         @for (c of list(); track c.id) {
@@ -63,6 +72,9 @@ import { Conversation } from '../core/models';
   `,
   styles: [`
     .filters { display: flex; gap: 6px; }
+    .manual { margin-bottom: 14px; } .manual summary { cursor: pointer; font-weight: 700; color: var(--olive); }
+    .manual form { display: grid; gap: 8px; margin-top: 10px; } .manual textarea { width: 100%; resize: vertical; }
+    .mrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
     .inbox { display: grid; grid-template-columns: 320px 1fr; gap: 14px; align-items: start; }
     @media (max-width: 900px) { .inbox { grid-template-columns: 1fr; } }
     .list { list-style: none; margin: 0; padding: 6px; max-height: 75vh; overflow: auto; }
@@ -91,10 +103,23 @@ export class ConversationsComponent {
   list = signal<Conversation[]>([]);
   sel = signal<Conversation | null>(null);
   text = '';
+  manual = '';
+  manualOpen = signal(false);
+  creating = signal(false);
+  manualErr = signal('');
+  private router = inject(Router);
 
   constructor() {
     const id = this.route.snapshot.queryParamMap.get('id');
     this.load(id);
+  }
+  fromMessage() {
+    this.creating.set(true);
+    this.manualErr.set('');
+    this.api.createQuote(this.manual).subscribe({
+      next: (r) => this.router.navigate(['/quotes', r.quote.id]),
+      error: (e) => { this.creating.set(false); this.manualErr.set(e.status === 0 ? 'השרת לא זמין' : 'לא הצלחנו ליצור הצעה. בדקו שמפתח ה-API מוגדר ב-backend.'); },
+    });
   }
   setFilter(f: string) { this.filter.set(f); this.load(); }
   load(openId?: string | null) {

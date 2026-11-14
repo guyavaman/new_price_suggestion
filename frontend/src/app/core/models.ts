@@ -1,4 +1,7 @@
-export type DealStage = 'new' | 'contacted' | 'quoted' | 'negotiation' | 'won' | 'lost';
+export type DealStage = 'new' | 'quoted' | 'won' | 'completed' | 'lost';
+export type Temperature = 'hot' | 'warm' | 'cold';
+export interface Payment { id: string; kind: string; amount: number; status: 'pending' | 'paid' | 'failed'; provider: string; paid_at: string | null; created_at: string }
+export interface Invoice { provider: string; number: string; url: string | null; amount: number; issued_at: string }
 export type Source = 'web_chat' | 'whatsapp' | 'email' | 'phone' | 'referral' | 'manual';
 
 export interface Customer {
@@ -32,6 +35,12 @@ export interface Deal {
   conversation_id: string | null;
   lead_score: number;
   score_reasons: string[];
+  ready_to_book: boolean;
+  temperature: Temperature;
+  final_guest_count: number | null;
+  payments: Payment[];
+  deposit_paid: number;
+  invoice: Invoice | null;
   lost_reason: string | null;
   source: Source;
   created_at: string;
@@ -80,6 +89,7 @@ export interface Conversation {
 
 export interface QuoteSummary {
   id: string;
+  public_token: string;
   number: string;
   status: string;
   selected_tier: string;
@@ -155,3 +165,38 @@ export interface StoredQuote {
 }
 export interface QuoteOut { quote: StoredQuote; sync: { integration_id: string; ok: boolean; detail: string }[] }
 export interface EditOut extends QuoteOut { reply: string; actions: { tool: string; input: Record<string, unknown>; error: boolean }[]; flags: string[] }
+
+// ---------- owner screens ----------
+export interface TodayView {
+  waiting_chats: { id: string; deal_id: string | null; escalated: boolean; status: string; reason: string | null; last: string; updated_at: string }[];
+  tasks_due: (Task & { deal_title: string | null })[];
+  events_this_week: { id: string; title: string; stage: DealStage; value: number | null; event_date: string; temperature: Temperature; guests: number | null; deposit_paid: number; final_count_confirmed: boolean }[];
+  hot_leads: { id: string; title: string; stage: DealStage; value: number | null; event_date: string | null; temperature: Temperature }[];
+  quotes_waiting: number; open_quotes_value: number; deposits_this_month: number; won_this_month: number;
+}
+export interface CalendarDay { date: string; deals: { id: string; title: string; stage: DealStage; guests: number | null; temperature: Temperature }[]; events_booked: number; guests_booked: number; full: boolean }
+export interface KitchenItem { sku: string; name: string; category: string; quantity: number; unit: string; serves: number | null; events: { deal_id: string; title: string; quantity: number }[] }
+export interface KitchenSheet {
+  date: string; total_guests: number; missing_quotes: string[]; food: KitchenItem[];
+  events: { deal_id: string; title: string; guests: number | null; location: string | null; meal_type: string | null; dietary: string[]; staff: string[]; equipment: string[]; tier: string | null }[];
+}
+export interface CatalogItem {
+  sku: string; name_he: string; name_en: string; category: string; unit: string; price: number; meal_type: string;
+  tags: string[]; serves: number | null; min_qty: number | null; description_he: string; active: boolean;
+}
+export interface BusinessSettings {
+  business_name: string; phone: string; email: string; business_id: string; vat_rate: number;
+  waiter_ratio: number; bartender_ratio: number; head_waiter_from: number; auto_waiters_from: number; staff_hours: number;
+  canapes_per_guest: number; volume_discounts: { min_subtotal: number; rate: number }[]; remote_areas: string[];
+  max_events_per_day: number; max_guests_per_day: number; quote_valid_days: number; deposit_rate: number;
+  payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
+  invoice_provider: string;
+}
+export interface PublicQuote {
+  business_name: string; business_phone: string; number: string; status: string; customer_name: string | null;
+  event: { type: string; date: string | null; guests: number | null; location: string | null; meal_type: string | null; kashrut: string | null };
+  cover_note: string | null;
+  tiers: { key: string; name: string; total: number; per_guest: number | null; deposit: number; items: { name: string; quantity: number; unit: string }[]; services: string[] }[];
+  selected_tier: string; valid_until: string; expired: boolean; deposit_rate: number; deposit_paid: number;
+  can_accept: boolean; can_update_count: boolean; final_guest_count: number | null;
+}

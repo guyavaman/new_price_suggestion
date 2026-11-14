@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 def _id() -> str:
@@ -20,17 +20,49 @@ def now() -> datetime:
 
 
 class DealStage(StrEnum):
-    new = "new"  # ליד חדש
-    contacted = "contacted"  # בשיחה
+    """Four steps a caterer actually thinks in, plus lost."""
+
+    new = "new"  # פנייה: an inquiry, not quoted yet
     quoted = "quoted"  # הצעה נשלחה
-    negotiation = "negotiation"  # משא ומתן
-    won = "won"  # נסגר
+    won = "won"  # נסגר: approved (deposit paid when payments are on)
+    completed = "completed"  # התקיים: the event happened
     lost = "lost"  # אבוד
 
 
-OPEN_STAGES = (DealStage.new, DealStage.contacted, DealStage.quoted, DealStage.negotiation)
-STAGE_HE = {"new": "ליד חדש", "contacted": "בשיחה", "quoted": "הצעה נשלחה",
-            "negotiation": "משא ומתן", "won": "נסגר", "lost": "אבוד"}
+OPEN_STAGES = (DealStage.new, DealStage.quoted)
+STAGE_HE = {"new": "פנייה", "quoted": "הצעה נשלחה", "won": "נסגר",
+            "completed": "התקיים", "lost": "אבוד"}
+
+
+class Temperature(StrEnum):
+    hot = "hot"  # חם
+    warm = "warm"  # פושר
+    cold = "cold"  # קר
+
+
+def temperature(score: int, ready_to_book: bool = False) -> Temperature:
+    if ready_to_book or score >= 70:
+        return Temperature.hot
+    return Temperature.warm if score >= 40 else Temperature.cold
+
+
+class Payment(BaseModel):
+    id: str = Field(default_factory=_id)
+    kind: str = "deposit"  # deposit | balance
+    amount: float
+    status: str = "pending"  # pending | paid | failed
+    provider: str = "demo"
+    provider_ref: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    paid_at: datetime | None = None
+
+
+class Invoice(BaseModel):
+    provider: str
+    number: str
+    url: str | None = None
+    amount: float
+    issued_at: datetime = Field(default_factory=now)
 
 
 class Source(StrEnum):
@@ -76,12 +108,27 @@ class Deal(BaseModel):
     conversation_id: str | None = None
     lead_score: int = 0
     score_reasons: list[str] = Field(default_factory=list)
+    ready_to_book: bool = False
+    final_guest_count: int | None = None
+    payments: list[Payment] = Field(default_factory=list)
+    invoice: Invoice | None = None
+    automation: dict[str, str] = Field(default_factory=dict, description="rule -> date it ran")
     owner: str | None = None
     lost_reason: str | None = None
     source: Source = Source.manual
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
     stage_changed_at: datetime = Field(default_factory=now)
+
+    @computed_field
+    @property
+    def temperature(self) -> Temperature:
+        return temperature(self.lead_score, self.ready_to_book)
+
+    @computed_field
+    @property
+    def deposit_paid(self) -> float:
+        return round(sum(p.amount for p in self.payments if p.status == "paid"), 2)
 
 
 class ActivityKind(StrEnum):

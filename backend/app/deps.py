@@ -7,7 +7,8 @@ from functools import lru_cache
 from fastapi import Depends, Header, HTTPException
 
 from app.agent.sales import SalesAgent
-from app.catalog.loader import load_catalog
+from app.business.settings import BusinessSettings, SettingsService
+from app.catalog.service import CatalogService
 from app.crm.service import CrmService
 from app.integrations.config import TenantConfig, load_tenant
 from app.integrations.sync import SyncLog, SyncService
@@ -17,12 +18,32 @@ from app.services.corrections import CorrectionStore
 from app.services.editing import EditService
 from app.services.extraction import ExtractionService
 from app.services.menu import MenuPlanner
+from app.services.portal import CustomerPortal
 from app.services.pricing import PricingEngine
 
 
 @lru_cache
-def get_catalog() -> list[CatalogItem]:
-    return load_catalog()
+def get_catalog_service() -> CatalogService:
+    return CatalogService()
+
+
+@lru_cache
+def get_settings_service() -> SettingsService:
+    return SettingsService()
+
+
+def get_tenant_id(x_tenant_id: str = Header("demo")) -> str:
+    return x_tenant_id
+
+
+def get_catalog(tenant_id: str = Depends(get_tenant_id),
+                svc: CatalogService = Depends(get_catalog_service)) -> list[CatalogItem]:
+    return svc.items(tenant_id)
+
+
+def get_rules(tenant_id: str = Depends(get_tenant_id),
+              svc: SettingsService = Depends(get_settings_service)) -> BusinessSettings:
+    return svc.get(tenant_id)
 
 
 @lru_cache
@@ -48,16 +69,18 @@ def get_extraction_service() -> ExtractionService:
     return ExtractionService()
 
 
-def get_menu_planner() -> MenuPlanner:
-    return MenuPlanner(get_catalog(), corrections=get_corrections())
+def get_menu_planner(catalog: list[CatalogItem] = Depends(get_catalog),
+                     corrections: CorrectionStore = Depends(get_corrections)) -> MenuPlanner:
+    return MenuPlanner(catalog, corrections=corrections)
 
 
-def get_engine() -> PricingEngine:
-    return PricingEngine(get_catalog())
+def get_engine(catalog: list[CatalogItem] = Depends(get_catalog),
+               rules: BusinessSettings = Depends(get_rules)) -> PricingEngine:
+    return PricingEngine(catalog, rules=rules)
 
 
-def get_edit_service() -> EditService:
-    return EditService(get_catalog())
+def get_edit_service(catalog: list[CatalogItem] = Depends(get_catalog)) -> EditService:
+    return EditService(catalog)
 
 
 def get_tenant(
@@ -75,8 +98,6 @@ def get_tenant(
     return tenant
 
 
-
-
 @lru_cache
 def get_crm() -> CrmService:
     return CrmService()
@@ -91,7 +112,19 @@ def get_public_tenant(x_tenant_id: str = Header("demo"),
     return tenant
 
 
-def get_sales_agent() -> SalesAgent:
-    planner = get_menu_planner()
-    return SalesAgent(get_crm(), get_catalog(), get_engine(), get_repo(),
-                      planner=lambda req: planner.plan(req)[0])
+def get_sales_agent(crm: CrmService = Depends(get_crm),
+                    catalog: list[CatalogItem] = Depends(get_catalog),
+                    engine: PricingEngine = Depends(get_engine),
+                    planner: MenuPlanner = Depends(get_menu_planner),
+                    rules: BusinessSettings = Depends(get_rules),
+                    repo=Depends(get_repo)) -> SalesAgent:
+    return SalesAgent(crm, catalog, engine, repo, planner=lambda req: planner.plan(req)[0],
+                      business_name=rules.business_name, rules=rules)
+
+
+def get_portal(repo=Depends(get_repo), crm: CrmService = Depends(get_crm),
+               catalog: CatalogService = Depends(get_catalog_service),
+               settings: SettingsService = Depends(get_settings_service),
+               sync: SyncService = Depends(get_sync),
+               loader=Depends(get_tenant_loader)) -> CustomerPortal:
+    return CustomerPortal(repo, crm, catalog, settings, sync, loader)

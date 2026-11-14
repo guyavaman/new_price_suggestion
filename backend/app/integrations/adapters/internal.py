@@ -14,6 +14,7 @@ from app.integrations.canonical import EventType, QuoteEvent
 from app.integrations.config import IntegrationConfig
 
 STAGE_FOR_EVENT = {
+    EventType.created: DealStage.quoted,  # a quote exists = "הצעה נשלחה" for the owner
     EventType.sent: DealStage.quoted,
     EventType.approved: DealStage.won,
     EventType.rejected: DealStage.lost,
@@ -47,6 +48,8 @@ class InternalCrmAdapter:
         deal.value = deal_info.amount_total
         deal = self.crm.save_deal(deal)
         stage = STAGE_FOR_EVENT.get(event.type)
+        if stage == DealStage.quoted and deal.stage != DealStage.new:
+            stage = None  # never move a won/completed deal back to "quoted"
         if stage:
             reason = "הלקוח דחה את ההצעה" if stage == DealStage.lost else None
             deal = self.crm.move_stage(t, deal.id, stage, Actor.system, reason)

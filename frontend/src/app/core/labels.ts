@@ -1,13 +1,17 @@
 import { DealStage } from './models';
 
 export const STAGES: { key: DealStage; label: string }[] = [
-  { key: 'new', label: 'ליד חדש' },
-  { key: 'contacted', label: 'בשיחה' },
+  { key: 'new', label: 'פנייה' },
   { key: 'quoted', label: 'הצעה נשלחה' },
-  { key: 'negotiation', label: 'משא ומתן' },
   { key: 'won', label: 'נסגר' },
+  { key: 'completed', label: 'התקיים' },
   { key: 'lost', label: 'אבוד' },
 ];
+export const TEMP: Record<string, string> = { hot: 'חם', warm: 'פושר', cold: 'קר' };
+export const CATEGORY: Record<string, string> = {
+  package: 'חבילות', salad: 'סלטים', starter: 'ראשונות', main: 'עיקריות', side: 'תוספות', canape: 'קבלת פנים',
+  breakfast: 'בוקר', dessert: 'קינוחים', drink: 'שתייה', bar: 'בר', equipment: 'ציוד', staff: 'צוות', logistics: 'לוגיסטיקה',
+};
 export const STAGE_LABEL = Object.fromEntries(STAGES.map((s) => [s.key, s.label])) as Record<DealStage, string>;
 
 export const EVENT_TYPE: Record<string, string> = {

@@ -26,6 +26,28 @@ prices them with deterministic business rules, and drafts the quote for a human 
 - **Guards in code**: no meat/dairy mixing at kosher events, unknown SKUs dropped, minimum
   orders, quantity/guest bounds, injection attempts flagged.
 
+## For the caterer: from inquiry to paid deposit
+
+One app, organised the way a catering owner works (Angular, `frontend/`):
+
+| Screen | What the owner gets |
+|---|---|
+| **היום** (Today) | Customers waiting for a reply (frustrated ones first), today's tasks, this week's events with deposit and final-count status, hot leads to call, money in this month |
+| **פניות** (Inbox) | Every chat the AI agent handles; step in when needed. Paste an email/phone inquiry to get a quote in seconds |
+| **אירועים** (Events) | Each inquiry is an event: פנייה → הצעה נשלחה → נסגר → התקיים (+ lost). Hot / warm / cold instead of scores |
+| **Event page** | Details, the 3 packages, **customer link**, payments, invoice, timeline, tasks, the agent conversation |
+| **Customer link** (`/q/:token`) | The customer picks a package, approves, **pays the deposit**, and later confirms the final guest count (re-priced automatically) |
+| **לוח שנה** (Calendar) | Month view: booked, pending, and days at kitchen capacity |
+| **מטבח** (Kitchen sheet) | How many portions of everything to prepare for all of a day's events, per event breakdown, staff and dietary warnings; printable |
+| **תפריט ומחירים** (Menu & prices) | The owner edits prices, adds dishes, marks items unavailable; the AI and every quote use it immediately |
+| **הגדרות** (Settings) | Staff ratios, volume discounts, delivery zones, capacity, deposit %, quote validity, reminder timing, invoice provider |
+
+Automatic follow-ups (`POST /automation/run`, schedule daily): nudge unanswered quotes with the
+customer link, expire old quotes, ask for the final guest count before the event, close events
+that happened and queue the invoice. Invoices: enter the number manually or issue them through
+Green Invoice / Morning. Payments: a provider interface with a demo checkout (no real charge);
+an Israeli processor is one class.
+
 ## Architecture
 
 ```
@@ -153,6 +175,10 @@ All calls send `X-Tenant-ID` (+ `X-API-Key` if configured). OpenAPI at `/docs`.
 | GET/POST | `/crm/deals`, `/crm/deals/{id}`, `/crm/deals/{id}/stage`, `/crm/deals/{id}/notes` | Deals, stage moves, notes |
 | GET | `/crm/dashboard`, `/crm/availability` | KPIs, capacity per date |
 | GET/POST | `/crm/customers`, `/crm/tasks`, `/crm/conversations/{id}/reply`, `/resume` | Customers, tasks, human takeover |
+| GET | `/crm/today`, `/crm/calendar?month=`, `/kitchen?day=` | Owner home, calendar, kitchen production sheet |
+| GET/POST/PATCH | `/catalog`, `/catalog/{sku}`, `/settings` | Menu & prices, business rules |
+| POST | `/automation/run`, `/crm/deals/{id}/invoice` | Daily follow-ups, invoices (manual / Morning) |
+| GET/POST | `/public/quotes/{token}` (+ `/accept`, `/guest-count`, `/payments/...`) | Customer page: approve, deposit, final count |
 | POST | `/extract` | Free text → structured request only |
 | POST | `/corrections`, `/reviews`; GET `/metrics/accuracy` | Learning from corrections |
 
@@ -223,7 +249,11 @@ evals/               cases, metrics, runner, results
 - [x] AI sales agent + catering CRM + Angular app + live demo
 - [x] Agent evals: 20 scripted conversations, price grounding, safety rules, optional LLM judge
 - [x] Angular app: top navbar, quote system (new / list / detail with tiers, edit, status) + CRM
-- [ ] Tenant pricing rules in config (staff ratios, discounts, delivery zones)
+- [x] Owner app: today, inbox, events (4 steps), calendar, kitchen sheet, menu & prices, settings
+- [x] Customer link with package choice, deposit payment (demo provider) and final guest count
+- [x] Business rules per tenant (staff ratios, discounts, zones, capacity), daily automation, invoices
+- [ ] WhatsApp channel for the agent
+- [ ] Real payment processor (Grow / Tranzila / CardCom) behind the provider interface
 - [ ] pgvector semantic retrieval once the catalog outgrows the prompt
 - [ ] Quotes, statuses, Hebrew RTL PDF
 - [ ] Angular UI: inbox, review screen, dashboard

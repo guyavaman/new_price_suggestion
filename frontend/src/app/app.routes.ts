@@ -1,16 +1,28 @@
 import { Routes } from '@angular/router';
 
+const page = (title: string, load: () => Promise<any>, data: Record<string, unknown> = {}) => ({ title, loadComponent: load, data });
+
 export const routes: Routes = [
-  { path: '', pathMatch: 'full', redirectTo: 'dashboard' },
-  { path: 'quotes/new', title: 'הצעה חדשה', loadComponent: () => import('./pages/quote-new.component').then((m) => m.QuoteNewComponent) },
-  { path: 'quotes/:id', title: 'הצעת מחיר', loadComponent: () => import('./pages/quote-detail.component').then((m) => m.QuoteDetailComponent) },
-  { path: 'quotes', title: 'הצעות מחיר', loadComponent: () => import('./pages/quotes-list.component').then((m) => m.QuotesListComponent) },
-  { path: 'dashboard', title: 'דשבורד', loadComponent: () => import('./pages/dashboard.component').then((m) => m.DashboardComponent) },
-  { path: 'pipeline', title: 'Pipeline', loadComponent: () => import('./pages/pipeline.component').then((m) => m.PipelineComponent) },
-  { path: 'deals/:id', title: 'עסקה', loadComponent: () => import('./pages/deal-detail.component').then((m) => m.DealDetailComponent) },
-  { path: 'customers', title: 'לקוחות', loadComponent: () => import('./pages/customers.component').then((m) => m.CustomersComponent) },
-  { path: 'conversations', title: "שיחות AI", loadComponent: () => import('./pages/conversations.component').then((m) => m.ConversationsComponent) },
-  { path: 'tasks', title: 'משימות', loadComponent: () => import('./pages/tasks.component').then((m) => m.TasksComponent) },
-  { path: 'chat', title: "צ'אט לקוח", loadComponent: () => import('./pages/chat-widget.component').then((m) => m.ChatWidgetComponent) },
-  { path: '**', redirectTo: 'dashboard' },
+  { path: '', pathMatch: 'full', redirectTo: 'today' },
+  { path: 'today', ...page('היום', () => import('./pages/today.component').then((m) => m.TodayComponent)) },
+  { path: 'inbox', ...page('פניות', () => import('./pages/conversations.component').then((m) => m.ConversationsComponent)) },
+  { path: 'events', ...page('אירועים', () => import('./pages/events.component').then((m) => m.EventsComponent)) },
+  { path: 'deals/:id', ...page('אירוע', () => import('./pages/deal-detail.component').then((m) => m.DealDetailComponent)) },
+  { path: 'calendar', ...page('לוח שנה', () => import('./pages/calendar.component').then((m) => m.CalendarComponent)) },
+  { path: 'kitchen', ...page('דף מטבח', () => import('./pages/kitchen.component').then((m) => m.KitchenComponent)) },
+  { path: 'menu', ...page('תפריט ומחירים', () => import('./pages/menu.component').then((m) => m.MenuComponent)) },
+  { path: 'settings', ...page('הגדרות', () => import('./pages/settings.component').then((m) => m.SettingsComponent)) },
+  { path: 'reports', ...page('דוחות', () => import('./pages/dashboard.component').then((m) => m.DashboardComponent)) },
+  { path: 'customers', ...page('לקוחות', () => import('./pages/customers.component').then((m) => m.CustomersComponent)) },
+  { path: 'quotes/new', redirectTo: 'inbox' },
+  { path: 'quotes/:id', ...page('הצעת מחיר', () => import('./pages/quote-detail.component').then((m) => m.QuoteDetailComponent)) },
+  { path: 'quotes', ...page('הצעות מחיר', () => import('./pages/quotes-list.component').then((m) => m.QuotesListComponent)) },
+  { path: 'chat', ...page("צ'אט לקוח", () => import('./pages/chat-widget.component').then((m) => m.ChatWidgetComponent)) },
+  // customer-facing, no navigation bar
+  { path: 'q/:token', ...page('הצעת מחיר', () => import('./pages/customer-quote.component').then((m) => m.CustomerQuoteComponent), { public: true }) },
+  { path: 'pay/:id', ...page('תשלום', () => import('./pages/pay.component').then((m) => m.PayComponent), { public: true }) },
+  // old links
+  { path: 'dashboard', redirectTo: 'today' }, { path: 'pipeline', redirectTo: 'events' }, { path: 'conversations', redirectTo: 'inbox' },
+  { path: 'tasks', redirectTo: 'today' },
+  { path: '**', redirectTo: 'today' },
 ];

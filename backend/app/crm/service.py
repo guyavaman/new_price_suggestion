@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from app.business.settings import SettingsService
 from app.crm.models import (
     OPEN_STAGES,
     STAGE_HE,
@@ -27,9 +28,13 @@ from app.integrations.canonical import EVENT_TYPE_HE, normalize_il_phone
 from app.repositories.store import STORE_DIR, Collection
 
 # Business capacity (per tenant settings later): how much the kitchen can take per day.
-MAX_EVENTS_PER_DAY = 3
+MAX_EVENTS_PER_DAY = 3  # defaults; the real values come from the owner's settings
 MAX_GUESTS_PER_DAY = 600
-BOOKED_STAGES = (DealStage.won, DealStage.negotiation)
+
+
+def _booked(d: Deal) -> bool:
+    """Counts against kitchen capacity: closed deals, and hot ones about to close."""
+    return d.stage == DealStage.won or (d.stage == DealStage.quoted and d.ready_to_book)
 
 
 class Availability(BaseModel):
@@ -65,7 +70,8 @@ class Dashboard(BaseModel):
 
 
 class CrmService:
-    def __init__(self, base: Path = STORE_DIR):
+    def __init__(self, base: Path = STORE_DIR, settings: SettingsService | None = None):
+        self.settings = settings or SettingsService(base)
         self.customers = Collection(Customer, base / "crm_customers.json")
         self.deals = Collection(Deal, base / "crm_deals.json")
         self.activities = Collection(Activity, base / "crm_activities.json")
@@ -168,16 +174,18 @@ class CrmService:
     # ---------- capacity ----------
     def availability(self, tenant: str, d: date, guests: int = 0,
                      exclude_deal: str | None = None) -> Availability:
-        booked = self.deals.list(tenant, lambda x: x.event_date == d and x.stage in BOOKED_STAGES
+        rules = self.settings.get(tenant)
+        booked = self.deals.list(tenant, lambda x: x.event_date == d and _booked(x)
                                  and x.id != exclude_deal)
-        events, g = len(booked), sum(x.guest_count or 0 for x in booked)
-        remaining = max(0, MAX_GUESTS_PER_DAY - g)
-        ok = events < MAX_EVENTS_PER_DAY and guests <= remaining
+        events = len(booked)
+        g = sum(x.final_guest_count or x.guest_count or 0 for x in booked)
+        remaining = max(0, rules.max_guests_per_day - g)
+        ok = events < rules.max_events_per_day and guests <= remaining
         if d < date.today():
             ok, note = False, "התאריך עבר"
         elif ok:
             note = "פנוי" if events == 0 else f"פנוי ({events} אירועים כבר מתוכננים)"
-        elif events >= MAX_EVENTS_PER_DAY:
+        elif events >= rules.max_events_per_day:
             note = "היומן מלא בתאריך הזה"
         else:
             note = f"נשאר מקום לעד {remaining} אורחים"
@@ -207,7 +215,7 @@ class CrmService:
             won_count_this_month=len(won_month),
             win_rate=round(len(by_stage[DealStage.won]) / closed, 3) if closed else None,
             avg_won_value=round(sum(won_vals) / len(won_vals), 2) if won_vals else None,
-            hot_leads=sum(1 for d in deals if d.stage in OPEN_STAGES and d.lead_score >= 70),
+            hot_leads=sum(1 for d in deals if d.stage in OPEN_STAGES and d.temperature == "hot"),
             overdue_tasks=sum(1 for t in tasks if t.due_at and t.due_at < now()),
             open_tasks=len(tasks),
             handed_off_chats=sum(1 for c in convs if c.status == "handed_off"),
@@ -216,6 +224,6 @@ class CrmService:
             sources=dict(Counter(d.source.value for d in deals)),
             upcoming_events=sorted(
                 [d for d in deals if d.event_date and today <= d.event_date <= horizon
-                 and d.stage in (DealStage.won, DealStage.negotiation, DealStage.quoted)],
+                 and d.stage in (DealStage.won, DealStage.quoted)],
                 key=lambda d: d.event_date),
         )

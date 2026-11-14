@@ -31,6 +31,7 @@ router = APIRouter(prefix="/crm", tags=["crm"])
 
 class QuoteSummary(BaseModel):
     id: str
+    public_token: str
     number: str
     status: str
     selected_tier: str
@@ -150,7 +151,8 @@ def get_deal(deal_id: str, t: TenantConfig = Depends(get_tenant),
         q = repo.get(t.tenant_id, qid)
         if q:
             quotes.append(QuoteSummary(
-                id=q.id, number=q.number, status=q.status.value, selected_tier=q.selected_tier,
+                id=q.id, public_token=q.public_token, number=q.number, status=q.status.value,
+                selected_tier=q.selected_tier,
                 created_at=q.created_at,
                 tiers=[{"key": x.key, "name": x.name, "total": x.quote.total,
                         "per_guest": x.quote.per_guest,

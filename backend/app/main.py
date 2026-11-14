@@ -7,7 +7,9 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.api import agent as agent_api
+from app.api import business as business_api
 from app.api import crm as crm_api
+from app.api import public as public_api
 from app.deps import (
     get_catalog,
     get_corrections,
@@ -48,6 +50,8 @@ app = FastAPI(
 
 app.include_router(crm_api.router)
 app.include_router(agent_api.router)
+app.include_router(public_api.router)
+app.include_router(business_api.router)
 
 __all__ = ["get_crm", "get_public_tenant", "get_sales_agent", "get_tenant_loader"]
 

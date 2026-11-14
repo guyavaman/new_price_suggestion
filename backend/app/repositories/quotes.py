@@ -7,6 +7,7 @@ adapter or route.
 
 from __future__ import annotations
 
+import secrets
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -33,6 +34,8 @@ class StatusChange(BaseModel):
 
 class StoredQuote(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    public_token: str = Field(default_factory=lambda: secrets.token_urlsafe(16),
+                              description="Secret for the customer's quote page link")
     tenant_id: str
     number: str
     status: QuoteStatus = QuoteStatus.draft
@@ -57,6 +60,7 @@ class QuoteRepository(Protocol):
     def add(self, quote: StoredQuote) -> StoredQuote: ...
     def get(self, tenant_id: str, quote_id: str) -> StoredQuote | None: ...
     def save(self, quote: StoredQuote) -> StoredQuote: ...
+    def find_by_token(self, token: str) -> StoredQuote | None: ...
     def list(self, tenant_id: str) -> list[StoredQuote]: ...
     def next_number(self, tenant_id: str) -> str: ...
 
@@ -104,6 +108,10 @@ class JsonQuoteRepository:
     def get(self, tenant_id: str, quote_id: str) -> StoredQuote | None:
         q = self._load().quotes.get(quote_id)
         return q if q and q.tenant_id == tenant_id else None  # tenant isolation
+
+    def find_by_token(self, token: str) -> StoredQuote | None:
+        return next((q for q in self._load().quotes.values()
+                     if secrets.compare_digest(q.public_token, token)), None)
 
     def list(self, tenant_id: str) -> list[StoredQuote]:
         return sorted((q for q in self._load().quotes.values() if q.tenant_id == tenant_id),

@@ -144,7 +144,7 @@ def test_agent_full_sales_conversation(agent_factory, crm, repo):
     ])
     r1 = agent.chat(T, f"היי, בר מצווה ל-120 איש ב-{d}, בשרי כשר, 8 טבעונים")
     cid = r1.conversation.id
-    assert r1.deal and r1.deal.stage == "contacted" and r1.deal.dietary == ["vegan:8"]
+    assert r1.deal and r1.deal.stage == "new" and r1.deal.dietary == ["vegan:8"]
     assert [a["tool"] for a in r1.actions] == ["save_lead", "check_availability", "estimate_price"]
     est = r1.actions[2]["output"]["packages"]
     assert [p["name"] for p in est] == ["בסיס", "מומלץ", "פרימיום"]
@@ -160,7 +160,8 @@ def test_agent_full_sales_conversation(agent_factory, crm, repo):
 
     r3 = agent.chat(T, "אפשר הנחה? רוצה לסגור", cid)
     assert r3.conversation.status == "handed_off"
-    assert crm.deals.get(T, deal.id).stage == "negotiation"
+    hot = crm.deals.get(T, deal.id)
+    assert hot.stage == "quoted" and hot.ready_to_book and hot.temperature == "hot"
     task = crm.tasks.list(T)[0]
     assert task.priority == "high" and task.created_by == "agent"  # ready to book = urgent
 
@@ -234,7 +235,7 @@ def test_internal_adapter_creates_and_advances_deal(crm, repo, catalog, engine,
     adapter = InternalCrmAdapter(IntegrationConfig(id="crm", type="internal"), crm=crm)
     res = adapter.sync(build_event(q, EventType.created), ExternalRefs())
     deal = crm.deals.get(T, res.refs.deal_id)
-    assert deal.stage == "new" and deal.value == q.tier().quote.total
+    assert deal.stage == "quoted" and deal.value == q.tier().quote.total
     q.status, q.selected_tier = QuoteStatus.approved, "premium"
     adapter.sync(build_event(q, EventType.approved), res.refs)
     deal = crm.deals.get(T, deal.id)
@@ -261,10 +262,10 @@ def test_crm_api_flow(api, crm):
     did = r.json()["id"]
     assert c.post(f"/crm/deals/{did}/stage", headers=h,
                   json={"stage": "lost"}).status_code == 422  # reason required
-    c.post(f"/crm/deals/{did}/stage", headers=h, json={"stage": "negotiation"})
+    c.post(f"/crm/deals/{did}/stage", headers=h, json={"stage": "quoted"})
     c.post("/crm/tasks", headers=h, json={"title": "לשלוח תפריט", "deal_id": did})
     detail = c.get(f"/crm/deals/{did}", headers=h).json()
-    assert detail["deal"]["stage"] == "negotiation" and detail["customer"]["name"] == "יוסי"
+    assert detail["deal"]["stage"] == "quoted" and detail["customer"]["name"] == "יוסי"
     assert {a["kind"] for a in detail["timeline"]} >= {"note", "stage", "task"}
     assert c.get("/crm/customers?q=0509998888", headers=h).json()[0]["name"] == "יוסי"
     dash = c.get("/crm/dashboard", headers=h).json()

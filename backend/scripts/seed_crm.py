@@ -22,6 +22,8 @@ from app.crm.models import (
     ConversationStatus,
     Deal,
     DealStage,
+    Invoice,
+    Payment,
     Source,
     now,
 )
@@ -33,24 +35,24 @@ from app.schemas.quote import QuoteStatus
 from app.services.pricing import PricingEngine
 from app.services.quotes import create_quote, standard_plan
 
-QUOTE_STATUS_FOR_STAGE = {"quoted": QuoteStatus.sent, "negotiation": QuoteStatus.sent,
-                          "won": QuoteStatus.approved, "lost": QuoteStatus.rejected}
+QUOTE_STATUS_FOR_STAGE = {"quoted": QuoteStatus.sent, "won": QuoteStatus.approved,
+                          "completed": QuoteStatus.approved, "lost": QuoteStatus.rejected}
 
 TENANT = "demo"
 SAMPLES = [
-    # name, phone, event_type, days_ahead, guests, meal, kashrut, stage, value, source
-    ("מיכל לוי", "0501234567", "bar_bat_mitzvah", 19, 120, "meat", "kosher", "quoted", 44672, "web_chat"),
-    ("יוסי כהן", "0529876543", "wedding", 45, 220, "meat", "mehadrin", "negotiation", 86400, "phone"),
-    ("נטע אברהם", "0541112233", "brit", 9, 60, "dairy", "kosher", "won", 9850, "web_chat"),
-    ("דנה שפירא", "0587654321", "corporate", 26, 180, "meat", "kosher", "won", 61200, "email"),
-    ("Amir Tech Ltd", "0533334444", "conference", 33, 90, "pareve", "kosher", "contacted", None, "web_chat"),
-    ("רונית גל", "0502223344", "birthday", 14, 35, "dairy", None, "new", None, "web_chat"),
-    ("אבי מזרחי", "0545556677", "wedding", 80, 300, "meat", "mehadrin", "quoted", 118500, "referral"),
-    ("שירה בן דוד", "0526667788", "private", 21, 30, "dairy", "kosher", "lost", 7400, "web_chat"),
-    ("עומר פרץ", "0508889900", "corporate", 6, 25, "meat", None, "won", 6200, "email"),
-    ("ליאת רוזן", "0521212121", "bar_bat_mitzvah", 60, 140, "meat", "kosher", "contacted", None, "whatsapp"),
-    ("גיא שמש", "0543434343", "holiday", 24, 70, "dairy", "kosher", "new", None, "web_chat"),
-    ("הדס יעקב", "0505656565", "birthday", 11, 40, "pareve", "kosher", "negotiation", 12900, "web_chat"),
+    # name, phone, event_type, days_ahead, guests, meal, kashrut, stage, ready_to_book, source
+    ("מיכל לוי", "0501234567", "bar_bat_mitzvah", 19, 120, "meat", "kosher", "quoted", False, "web_chat"),
+    ("יוסי כהן", "0529876543", "wedding", 45, 220, "meat", "mehadrin", "quoted", True, "phone"),
+    ("נטע אברהם", "0541112233", "brit", 3, 60, "dairy", "kosher", "won", False, "web_chat"),
+    ("דנה שפירא", "0587654321", "corporate", 3, 180, "meat", "kosher", "won", False, "email"),
+    ("Amir Tech Ltd", "0533334444", "conference", 33, 90, "pareve", "kosher", "new", False, "web_chat"),
+    ("רונית גל", "0502223344", "birthday", 14, 35, "dairy", None, "new", False, "web_chat"),
+    ("אבי מזרחי", "0545556677", "wedding", 80, 300, "meat", "mehadrin", "quoted", False, "referral"),
+    ("שירה בן דוד", "0526667788", "private", 21, 30, "dairy", "kosher", "lost", False, "web_chat"),
+    ("עומר פרץ", "0508889900", "corporate", 6, 25, "meat", None, "won", False, "email"),
+    ("ליאת רוזן", "0521212121", "bar_bat_mitzvah", 60, 140, "meat", "kosher", "new", False, "whatsapp"),
+    ("גיא שמש", "0543434343", "holiday", -4, 70, "dairy", "kosher", "completed", False, "web_chat"),
+    ("הדס יעקב", "0505656565", "birthday", 11, 40, "pareve", "kosher", "quoted", True, "web_chat"),
 ]
 
 CHAT = [
@@ -76,7 +78,8 @@ def main() -> None:
     engine = PricingEngine(catalog)
     rnd = random.Random(7)
     today = date.today()
-    for i, (name, phone, etype, days, guests, meal, kashrut, stage, value, src) in enumerate(SAMPLES):
+    for i, (name, phone, etype, days, guests, meal, kashrut, stage, ready, src) in enumerate(SAMPLES):
+        value = None
         company = name if "Ltd" in name else None
         c = crm.upsert_customer(TENANT, name=None if company else name, phone=phone,
                                 company=company, source=Source(src))
@@ -84,9 +87,11 @@ def main() -> None:
             tenant_id=TENANT, customer_id=c.id, title="", source=Source(src), value=value,
             event_type=etype, event_date=today + timedelta(days=days), guest_count=guests,
             meal_type=meal, kashrut=kashrut, budget=rnd.choice([None, None, 250, 300]),
-            budget_scope="per_guest",
+            budget_scope="per_guest", ready_to_book=ready,
         ))
-        crm.log(TENANT, ActivityKind.system, f"ליד חדש ({src})", Actor.system, deal_id=d.id,
+        src_he = {"web_chat": "צ'אט באתר", "phone": "טלפון", "email": "מייל", "referral": "המלצה",
+                  "whatsapp": "וואטסאפ"}[src]
+        crm.log(TENANT, ActivityKind.system, f"פנייה חדשה ({src_he})", Actor.system, deal_id=d.id,
                 customer_id=c.id)
         if stage in QUOTE_STATUS_FOR_STAGE:  # a real stored quote behind every quoted deal
             req = ExtractedRequest(language="he", event_type=etype, guest_count=guests,
@@ -100,6 +105,11 @@ def main() -> None:
             q.history.append(StatusChange(status=q.status))
             repo.save(q)
             d.quote_ids, d.value = [q.id], q.tier().quote.total
+            if stage in ("won", "completed"):
+                deposit = round(d.value * 0.3, 2)
+                d.payments = [Payment(amount=deposit, status="paid", paid_at=now())]
+                if stage == "completed":
+                    d.invoice = Invoice(provider="manual", number="INV-1001", amount=d.value)
             d = crm.save_deal(d)
             crm.log(TENANT, ActivityKind.quote, f"הצעת מחיר {q.number} נוצרה", Actor.system,
                     deal_id=d.id, meta={"quote_id": q.id})
@@ -108,7 +118,7 @@ def main() -> None:
                            else Actor.user, "המחיר גבוה מהתקציב" if stage == "lost" else None)
         if src == "web_chat":
             conv = Conversation(tenant_id=TENANT, customer_id=c.id, deal_id=d.id,
-                                status=ConversationStatus.handed_off if stage == "negotiation"
+                                status=ConversationStatus.handed_off if ready
                                 else ConversationStatus.active,
                                 messages=[ChatMessage(role=ChatRole(r), text=t) for r, t in CHAT]
                                 if i == 0 else [ChatMessage(role=ChatRole.user,
@@ -119,10 +129,10 @@ def main() -> None:
             d = crm.deals.get(TENANT, d.id)  # reload: move_stage saved a newer copy
             d.conversation_id = conv.id
             crm.save_deal(d)
-        if stage in ("quoted", "negotiation", "contacted"):
+        if stage in ("quoted", "new"):
             crm.add_task(TENANT, "שיחת מעקב על ההצעה" if stage == "quoted" else "לחזור ללקוח",
                          deal_id=d.id, due_at=now() + timedelta(hours=rnd.choice([-5, 3, 26])),
-                         priority="high" if stage == "negotiation" else "normal",
+                         priority="high" if ready else "normal",
                          created_by=Actor.agent)
         crm.activities.put(Activity(tenant_id=TENANT, deal_id=d.id, kind=ActivityKind.note,
                                     text=rnd.choice(["מעדיפים הגשה למזנון", "שאלו על מגדל קינוחים",
