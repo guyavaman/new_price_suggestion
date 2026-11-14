@@ -19,7 +19,7 @@ const TOOL_LABEL: Record<string, string> = {
     <div class="page-head"><div><h1>צ'אט לקוח</h1><p>כך הסוכן נראה באתר של העסק. כל מה שהוא אוסף מופיע מיד ב-CRM.</p></div>
       <button class="btn ghost" (click)="reset()">שיחה חדשה</button></div>
     <div class="phone">
-      <header><b>נועה · זית ודבש</b><span>סוכנת דיגיטלית · עונה מיד</span></header>
+      <header><b>נועה · זית ודבש</b><span>{{ status() === 'human' ? 'נציג מהצוות בשיחה' : status() === 'handed_off' ? 'נציג יצטרף בקרוב · נועה ממשיכה לעזור' : 'סוכנת דיגיטלית · עונה מיד' }}</span></header>
       <div class="msgs" #box>
         @for (m of msgs(); track $index) {
           <div class="msg {{ m.role }}">{{ m.text }}
@@ -58,13 +58,14 @@ export class ChatWidgetComponent {
   box = viewChild<ElementRef<HTMLDivElement>>('box');
   msgs = signal<Bubble[]>([{ role: 'assistant', text: 'היי! אני נועה מזית ודבש 🙂 איזה אירוע אתם מתכננים?' }]);
   busy = signal(false);
+  status = signal<string>('active');
   error = signal('');
   text = '';
   conversationId: string | null = null;
   starters = ['בר מצווה ל-120 איש בדצמבר', 'כמה עולה אירוע חלבי ל-40 איש?', 'יש לכם תפריט טבעוני?'];
 
   label(t: string) { return TOOL_LABEL[t] ?? t; }
-  reset() { this.conversationId = null; this.msgs.set(this.msgs().slice(0, 1)); }
+  reset() { this.conversationId = null; this.status.set('active'); this.msgs.set(this.msgs().slice(0, 1)); }
 
   send() {
     const text = this.text.trim();
@@ -77,7 +78,8 @@ export class ChatWidgetComponent {
     this.api.chat(text, this.conversationId).subscribe({
       next: (r) => {
         this.conversationId = r.conversation_id;
-        this.msgs.update((m) => [...m, { role: 'assistant', text: r.reply, tools: r.actions }]);
+        if (r.reply) this.msgs.update((m) => [...m, { role: 'assistant', text: r.reply, tools: r.actions }]);
+        this.status.set(r.status);
         this.busy.set(false);
         this.scroll();
       },

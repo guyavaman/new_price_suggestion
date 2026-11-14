@@ -17,6 +17,7 @@ import { Dashboard } from '../core/models';
     @if (error()) { <div class="err">{{ error() }}</div> }
     @if (d(); as d) {
       <div class="alerts">
+        @if (d.escalated_chats) { <a routerLink="/conversations" class="alert bad">🔥 {{ d.escalated_chats }} לקוחות מתוסכלים מחכים למענה</a> }
         @if (d.handed_off_chats) { <a routerLink="/conversations" class="alert bad">{{ d.handed_off_chats }} שיחות מהסוכן ממתינות לנציג</a> }
         @if (d.overdue_tasks) { <a routerLink="/tasks" class="alert warn">{{ d.overdue_tasks }} משימות באיחור</a> }
         @if (d.hot_leads) { <a routerLink="/pipeline" class="alert hot">{{ d.hot_leads }} לידים חמים (ציון 70+)</a> }

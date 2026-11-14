@@ -89,7 +89,8 @@ def run_case(case: dict, llm: LLMClient, today: date, use_planner: bool = False)
                 text = render(msg, today)
                 r = agent.chat(TENANT, text, conv_id, today=today)
                 conv_id = r.conversation.id
-                replies.append(r.reply)
+                if r.reply:
+                    replies.append(r.reply)
                 tool_calls += r.actions
                 for k in usage:
                     usage[k] += r.usage.get(k, 0)
@@ -116,6 +117,7 @@ def run_case(case: dict, llm: LLMClient, today: date, use_planner: bool = False)
             customer=customer.model_dump(mode="json") if customer else None,
             status=conv.status.value if conv else "none",
             quote_lines=quote_lines,
+            escalated=bool(conv and conv.escalated),
         )
     expected = render_obj(case.get("expected", {}), today)
     score = score_case(case["id"], expected, transcript)

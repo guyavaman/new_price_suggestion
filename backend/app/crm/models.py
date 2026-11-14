@@ -136,12 +136,13 @@ class ChatMessage(BaseModel):
     text: str
     at: datetime = Field(default_factory=now)
     tools: list[dict] = Field(default_factory=list, description="Tool calls made for this reply")
-    by: str = Field("ai", description="For assistant messages: 'ai' or 'human' (salesperson)")
+    by: str = Field("ai", description="Assistant messages: 'ai', 'human' or 'system' (auto)")
 
 
 class ConversationStatus(StrEnum):
-    active = "active"
-    handed_off = "handed_off"  # waiting for a human
+    active = "active"  # the AI handles the chat
+    handed_off = "handed_off"  # waiting for a human; the AI keeps helping within limits
+    human = "human"  # a salesperson is talking; the AI stays silent
     closed = "closed"
 
 
@@ -154,5 +155,8 @@ class Conversation(BaseModel):
     deal_id: str | None = None
     messages: list[ChatMessage] = Field(default_factory=list)
     lead_score: int = 0
+    handoff_reason: str | None = None
+    handoff_task_id: str | None = None
+    escalated: bool = False  # customer showed frustration while waiting
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)

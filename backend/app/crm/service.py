@@ -58,6 +58,7 @@ class Dashboard(BaseModel):
     overdue_tasks: int
     open_tasks: int
     handed_off_chats: int
+    escalated_chats: int = 0
     chat_conversion: float | None
     sources: dict[str, int]
     upcoming_events: list[Deal]
@@ -210,6 +211,7 @@ class CrmService:
             overdue_tasks=sum(1 for t in tasks if t.due_at and t.due_at < now()),
             open_tasks=len(tasks),
             handed_off_chats=sum(1 for c in convs if c.status == "handed_off"),
+            escalated_chats=sum(1 for c in convs if c.escalated and c.status != "closed"),
             chat_conversion=round(len(chat_deals) / len(convs), 3) if convs else None,
             sources=dict(Counter(d.source.value for d in deals)),
             upcoming_events=sorted(

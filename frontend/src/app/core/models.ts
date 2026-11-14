@@ -63,12 +63,14 @@ export interface ChatMessage {
   text: string;
   at: string;
   tools: { tool: string; error: boolean }[];
-  by: 'ai' | 'human';
+  by: 'ai' | 'human' | 'system';
 }
 
 export interface Conversation {
   id: string;
-  status: 'active' | 'handed_off' | 'closed';
+  status: 'active' | 'handed_off' | 'human' | 'closed';
+  escalated: boolean;
+  handoff_reason: string | null;
   customer_id: string | null;
   deal_id: string | null;
   messages: ChatMessage[];
@@ -111,6 +113,7 @@ export interface Dashboard {
   overdue_tasks: number;
   open_tasks: number;
   handed_off_chats: number;
+  escalated_chats: number;
   chat_conversion: number | null;
   sources: Record<string, number>;
   upcoming_events: Deal[];

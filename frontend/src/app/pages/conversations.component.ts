@@ -24,7 +24,9 @@ import { Conversation } from '../core/models';
           <li [class.on]="sel()?.id === c.id" (click)="open(c.id)">
             <div class="row">
               <b>{{ preview(c) }}</b>
-              @if (c.status === 'handed_off') { <span class="pill hot">ממתין לנציג</span> }
+              @if (c.escalated && c.status !== 'closed') { <span class="pill hot">🔥 דחוף</span> }
+              @else if (c.status === 'handed_off') { <span class="pill warn">ממתין לנציג</span> }
+              @else if (c.status === 'human') { <span class="pill">נציג בשיחה</span> }
             </div>
             <div class="row muted"><span>{{ c.messages.length }} הודעות · {{ c.updated_at | rel }}</span>
               @if (c.lead_score) { <span class="score" [class.hot]="c.lead_score >= 70">{{ c.lead_score }}</span> }</div>
@@ -37,7 +39,8 @@ import { Conversation } from '../core/models';
             <span>
               @if (c.deal_id) { <a [routerLink]="['/deals', c.deal_id]">לעסקה ב-CRM ←</a> } @else { <span class="muted">עוד לא נוצר ליד</span> }
             </span>
-            @if (c.status === 'handed_off') {
+            @if (c.handoff_reason) { <span class="muted">סיבת העברה: {{ c.handoff_reason }}</span> }
+            @if (c.status === 'handed_off' || c.status === 'human') {
               <button class="btn ghost" (click)="resume(c.id)">להחזיר לסוכן AI</button>
             }
           </header>
@@ -45,7 +48,7 @@ import { Conversation } from '../core/models';
             @for (m of c.messages; track $index) {
               <div class="msg {{ m.role }}" [class.human]="m.by === 'human'">
                 <div>{{ m.text }}</div>
-                <small>{{ m.role === 'user' ? 'לקוח' : m.by === 'human' ? 'נציג' : 'סוכן AI' }} · {{ m.at | heDate: true }}
+                <small>{{ m.role === 'user' ? 'לקוח' : m.by === 'human' ? 'נציג' : m.by === 'system' ? 'הודעה אוטומטית' : 'סוכן AI' }} · {{ m.at | heDate: true }}
                   @for (t of m.tools; track $index) { <code [class.err]="t.error">{{ t.tool }}</code> }</small>
               </div>
             }

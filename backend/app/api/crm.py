@@ -261,9 +261,9 @@ def get_conversation(conv_id: str, t: TenantConfig = Depends(get_tenant),
 @router.post("/conversations/{conv_id}/reply", response_model=Conversation)
 def human_reply(conv_id: str, body: ReplyIn, t: TenantConfig = Depends(get_tenant),
                 crm: CrmService = Depends(get_crm)):
-    """A salesperson answers in the chat. The AI stays paused until /resume."""
+    """A salesperson answers in the chat. The AI stays silent until /resume."""
     c = get_conversation(conv_id, t, crm)
-    c.status = ConversationStatus.handed_off
+    c.status = ConversationStatus.human
     c.messages.append(ChatMessage(role=ChatRole.assistant, text=body.text, by="human"))
     if c.deal_id:
         crm.log(t.tenant_id, ActivityKind.chat, f"נציג ענה בצ'אט: {body.text}", Actor.user,

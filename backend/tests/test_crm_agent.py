@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.agent.sales import SalesAgent
-from app.crm.models import Actor, Deal, DealStage, Source
+from app.crm.models import Actor, ConversationStatus, Deal, DealStage, Source
 from app.crm.scoring import score
 from app.crm.service import MAX_EVENTS_PER_DAY, CrmService
 from app.integrations.adapters.internal import InternalCrmAdapter
@@ -136,8 +136,11 @@ def test_agent_full_sales_conversation(agent_factory, crm, repo):
         _resp([_text("שלחתי לך הצעה מסודרת עם 3 חבילות!")]),
         # turn 3: discount -> handoff
         _resp([_tool("6", "handoff_to_human", {"reason": "מבקשת הנחה ורוצה לסגור",
-                                                "ready_to_book": True, "urgent": True})]),
+                                                "ready_to_book": True})]),
         _resp([_text("העברתי לנציג שיחזור אלייך תוך שעה.")]),
+        # turn 4: frustrated while waiting -> AI still answers, escalates the same task
+        _resp([_tool("7", "handoff_to_human", {"reason": "הלקוחה מתוסכלת", "urgent": True})]),
+        _resp([_text("מבינה אותך לגמרי. סימנתי את זה כדחוף, נציג יתקשר אלייך בשעה הקרובה.")]),
     ])
     r1 = agent.chat(T, f"היי, בר מצווה ל-120 איש ב-{d}, בשרי כשר, 8 טבעונים")
     cid = r1.conversation.id
@@ -159,14 +162,37 @@ def test_agent_full_sales_conversation(agent_factory, crm, repo):
     assert r3.conversation.status == "handed_off"
     assert crm.deals.get(T, deal.id).stage == "negotiation"
     task = crm.tasks.list(T)[0]
-    assert task.priority == "high" and task.created_by == "agent"
+    assert task.priority == "high" and task.created_by == "agent"  # ready to book = urgent
 
-    # after handoff the AI is silent; the message is logged for the human
+    # while waiting for a human the AI keeps helping, and frustration escalates
     n_calls = len(script.calls)
-    r4 = agent.chat(T, "הלו?", cid)
-    assert len(script.calls) == n_calls and "נציג" in r4.reply
+    r4 = agent.chat(T, "לא משנה, אתם לא רציניים", cid)
+    assert len(script.calls) > n_calls and "דחוף" in r4.reply
+    system = script.calls[-1]["system"]
+    assert "הועברה לנציג" in system and "מתוסכל" in system
+    assert r4.conversation.escalated and len(crm.tasks.list(T)) == 1  # same task, not a new one
     kinds = [a.kind for a in crm.timeline(T, deal.id)]
     assert {"chat", "quote", "stage", "handoff", "task"} <= set(kinds)
+
+
+def test_human_mode_acknowledges_once_and_escalates(agent_factory, crm):
+    agent, script = agent_factory([
+        _resp([_tool("1", "save_lead", {"name": "דנה", "phone": "0521112222"}),
+               _tool("2", "handoff_to_human", {"reason": "שאלה על תפריט מיוחד"})]),
+        _resp([_text("העברתי לנציג")]),
+    ])
+    r = agent.chat(T, "יש לכם תפריט ללא שומשום? דנה 052-1112222")
+    conv = r.conversation
+    conv.status = ConversationStatus.human  # a salesperson replied from the CRM
+    crm.conversations.put(conv)
+    calls = len(script.calls)
+    a = agent.chat(T, "ומה עם קינוחים?", conv.id)
+    b = agent.chat(T, "הלו? אף אחד לא עונה, אני אלך למקום אחר", conv.id)
+    assert len(script.calls) == calls  # AI silent while a human is in the chat
+    assert a.reply and b.reply == ""  # acknowledged once, never the same line again
+    task = crm.tasks.get(T, b.conversation.handoff_task_id)
+    assert b.conversation.escalated and task.priority == "high" and task.title.startswith("🔥")
+    assert [m.by for m in b.conversation.messages if m.role == "assistant"][-1] == "system"
 
 
 def test_agent_tool_guardrails(agent_factory):
@@ -261,5 +287,5 @@ def test_agent_api_and_human_takeover(api, agent_factory, crm):
     assert inbox[0]["id"] == cid
     conv = c.post(f"/crm/conversations/{cid}/reply", headers=h,
                   json={"text": "היי, כן! יש לנו כמה מנות"}).json()
-    assert conv["messages"][-1]["by"] == "human"
+    assert conv["messages"][-1]["by"] == "human" and conv["status"] == "human"
     assert c.post(f"/crm/conversations/{cid}/resume", headers=h).json()["status"] == "active"

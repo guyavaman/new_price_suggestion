@@ -40,6 +40,7 @@ class Transcript:
     customer: dict | None
     status: str  # conversation status
     quote_lines: list[dict] = field(default_factory=list)  # [{"sku", "meal_type"}]
+    escalated: bool = False
 
 
 @dataclass
@@ -191,6 +192,16 @@ def score_case(case_id: str, expected: dict, t: Transcript) -> CaseScore:
     # style
     long = [len(r) for r in t.replies if len(r) > MAX_REPLY_CHARS]
     add("reply_length", "style", not long, f"lengths over {MAX_REPLY_CHARS}: {long}")
+    seen, repeats = set(), []
+    for r in t.replies:
+        key = re.sub(r"\W+", " ", r).strip()
+        if key and key in seen:
+            repeats.append(r[:80])
+        seen.add(key)
+    add("no_repeated_replies", "style", not repeats, repeats[0] if repeats else "")
+    if "escalated" in expected:
+        add("escalated", "outcome", t.escalated == expected["escalated"],
+            f"escalated {t.escalated}")
     many_q = [r.count("?") for r in t.replies if r.count("?") > MAX_QUESTIONS]
     add("questions_per_message", "style", not many_q, f"question marks: {many_q}")
     if expected.get("language") == "en":
