@@ -97,9 +97,10 @@ class LLMClient:
         self,
         *,
         system: str,
-        user: str,
+        user: str | None = None,
         tools: list[ToolSpec],
         max_steps: int = 8,
+        history: list[dict] | None = None,
     ) -> AgentRun:
         """Classic tool-use loop: the model calls our functions until it answers in text.
 
@@ -111,7 +112,11 @@ class LLMClient:
             {"name": t.name, "description": t.description, "input_schema": t.input_schema}
             for t in tools
         ]
-        messages: list[dict] = [{"role": "user", "content": user}]
+        messages: list[dict] = list(history or [])
+        if user is not None:
+            messages.append({"role": "user", "content": user})
+        if not messages or messages[-1]["role"] != "user":
+            raise ValueError("Conversation must end with a user message")
         run = AgentRun(final_text="")
         start = time.perf_counter()
 

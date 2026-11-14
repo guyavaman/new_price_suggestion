@@ -1,6 +1,7 @@
 # AI Quote Agent 🍽️
 
-**Turn a messy WhatsApp message into a priced catering quote in seconds.**
+**Turn a messy WhatsApp message into a priced catering quote in seconds, sell it with an AI
+chat agent, and manage the deal in a built-in CRM.**
 
 Customers of an Israeli catering company write in Hebrew or English, by email, WhatsApp or voice:
 
@@ -66,6 +67,35 @@ python evals/run_extraction.py --only he-009,en-004  # just the injection cases
 |---|---|---|---|---|
 | _to be filled after first run_ | extract-v1 | | | |
 
+## AI sales agent + catering CRM
+
+A website chat agent ("Noa") sells for the business, and everything she learns lands in a CRM
+built for catering:
+
+```
+customer chat ─► Sales agent (Claude + tools) ─► CRM: customer, deal, timeline, tasks
+                   │ search_menu        catalog prices
+                   │ check_availability kitchen capacity per date (from CRM bookings)
+                   │ estimate_price     deterministic engine, 3 packages
+                   │ save_lead          upsert customer + deal, explainable lead score
+                   │ create_quote       real stored quote linked to the deal -> stage "quoted"
+                   └ handoff_to_human   AI pauses, high-priority task, salesperson replies in chat
+```
+
+- **The agent never invents numbers**: prices, availability and quotes come only from tools.
+  No tool grants discounts; those requests are handed to a human.
+- **Human takeover**: a handed-off chat stops the AI. The salesperson answers from the CRM inbox
+  and can give the conversation back to the agent.
+- **CRM for catering**: deals are events (date, guests, kashrut, meat/dairy, dietary groups),
+  pipeline `new → contacted → quoted → negotiation → won/lost`, timeline of every agent and human
+  action, tasks, capacity check per day, dashboard (pipeline value, win rate, chat-to-lead
+  conversion, upcoming events).
+- **Lead score is deterministic and explained** ("+15 event date known", "+10 event within 60 days").
+- **Quotes flow in automatically**: the built-in `internal` CRM adapter consumes the same quote
+  events as HubSpot/monday, so a quote approved anywhere moves the deal to *won*.
+- **Angular 18 app** in `frontend/` (signals, standalone components, CDK drag-and-drop, RTL).
+- **Live demo**: `demo/crm.html`, chat on one side and the CRM updating live on the other.
+
 ## CRM integration
 
 Built to drop into whatever CRM a business already uses, without touching the core:
@@ -94,6 +124,10 @@ All calls send `X-Tenant-ID` (+ `X-API-Key` if configured). OpenAPI at `/docs`.
 | GET | `/quotes/{id}/event` | Preview the exact CRM payload |
 | POST | `/quotes/{id}/sync`, GET `/quotes/{id}/sync-log` | Re-push, delivery log |
 | GET | `/exports/deals.csv`, `/exports/line-items.csv` | CRM import files |
+| POST | `/agent/chat` | Public chat widget endpoint (sales agent) |
+| GET/POST | `/crm/deals`, `/crm/deals/{id}`, `/crm/deals/{id}/stage`, `/crm/deals/{id}/notes` | Deals, stage moves, notes |
+| GET | `/crm/dashboard`, `/crm/availability` | KPIs, capacity per date |
+| GET/POST | `/crm/customers`, `/crm/tasks`, `/crm/conversations/{id}/reply`, `/resume` | Customers, tasks, human takeover |
 | POST | `/extract` | Free text → structured request only |
 | POST | `/corrections`, `/reviews`; GET `/metrics/accuracy` | Learning from corrections |
 
@@ -109,9 +143,13 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -r requirements-dev.txt
 cp ../.env.example .env            # add your ANTHROPIC_API_KEY
 python -m scripts.seed_catalog     # loads catalog + embeddings (first run downloads the model)
+python -m scripts.seed_crm --reset # sample CRM data for the demo tenant
 uvicorn app.main:app --reload      # http://localhost:8000/docs
 
-# 3. Tests (no API key needed — the LLM is faked)
+# 3. Frontend (another terminal)
+cd frontend && npm install && npm start   # http://localhost:4200
+
+# 4. Tests (no API key needed — the LLM is faked)
 pytest
 ```
 
@@ -133,6 +171,10 @@ backend/
     integrations/ canonical event, tenant config + mapping, sync service, exports
       adapters/   webhook, hubspot, monday
     repositories/ quote storage interface (JSON today, DB-ready)
+    crm/          customers, deals, activities, tasks, scoring, capacity, dashboard
+    agent/        AI sales agent (multi-turn, tool use, human handoff)
+    api/          /crm and /agent routers
+frontend/         Angular 18 CRM app
     catalog/      loader + embeddings
   scripts/        seed_catalog
   tests/
@@ -153,6 +195,8 @@ evals/               cases, metrics, runner, results
 - [x] Three packages, plain-language editing with tool use, learning from corrections
 - [x] Live browser demo
 - [x] CRM integration layer: canonical events, signed webhooks, HubSpot, monday.com, CSV
+- [x] AI sales agent + catering CRM + Angular app + live demo
+- [ ] Agent evals: scripted customer conversations scored for data captured and rules kept
 - [ ] Tenant pricing rules in config (staff ratios, discounts, delivery zones)
 - [ ] pgvector semantic retrieval once the catalog outgrows the prompt
 - [ ] Quotes, statuses, Hebrew RTL PDF
@@ -163,4 +207,4 @@ evals/               cases, metrics, runner, results
 
 ## Stack
 
-Python · FastAPI · Pydantic · Claude API · PostgreSQL · pgvector · sentence-transformers · Angular · pytest · GitHub Actions
+Python · FastAPI · Pydantic · Claude API · PostgreSQL · pgvector · sentence-transformers · Angular 18 · Angular CDK · pytest · GitHub Actions

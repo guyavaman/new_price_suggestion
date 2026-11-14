@@ -1,19 +1,33 @@
-import hmac
 import os
 from datetime import date
-from functools import lru_cache
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.catalog.loader import load_catalog
+from app.api import agent as agent_api
+from app.api import crm as crm_api
+from app.deps import (
+    get_catalog,
+    get_corrections,
+    get_crm,
+    get_edit_service,
+    get_engine,
+    get_extraction_service,
+    get_menu_planner,
+    get_public_tenant,
+    get_repo,
+    get_sales_agent,
+    get_sync,
+    get_tenant,
+    get_tenant_loader,
+)
 from app.integrations.canonical import STATUS_EVENT, EventType, QuoteEvent, build_event
-from app.integrations.config import TenantConfig, load_tenant
+from app.integrations.config import TenantConfig
 from app.integrations.export import deals_csv, line_items_csv
-from app.integrations.sync import SyncLog, SyncRecord, SyncService
-from app.repositories.quotes import JsonQuoteRepository, StatusChange, StoredQuote
+from app.integrations.sync import SyncRecord, SyncService
+from app.repositories.quotes import StatusChange, StoredQuote
 from app.schemas.catalog import CatalogItem
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import QuoteStatus, TierQuote
@@ -22,78 +36,29 @@ from app.services.editing import EditService
 from app.services.extraction import ExtractionService
 from app.services.menu import MenuPlanner
 from app.services.pricing import PricingEngine
-from app.services.tiers import build_tiers
+from app.services.quotes import create_quote as create_stored_quote
+from app.services.quotes import tiers_for
 
 app = FastAPI(
     title="AI Quote Agent",
-    version="0.3.0",
+    version="0.4.0",
     description="Free-text catering requests to priced quotes, with CRM integration. "
                 "Send `X-Tenant-ID` (and `X-API-Key` when the tenant has one) on every call.",
 )
 
+app.include_router(crm_api.router)
+app.include_router(agent_api.router)
+
+__all__ = ["get_crm", "get_public_tenant", "get_sales_agent", "get_tenant_loader"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:4200"],  # Angular dev server
+    # Angular dev server + sites embedding the chat widget (comma-separated env var)
+    allow_origins=["http://localhost:4200",
+                   *[o for o in os.environ.get("CORS_ORIGINS", "").split(",") if o]],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ---------- dependencies (overridable in tests) ----------
-
-@lru_cache
-def get_catalog() -> list[CatalogItem]:
-    return load_catalog()
-
-
-@lru_cache
-def get_corrections() -> CorrectionStore:
-    return CorrectionStore()
-
-
-@lru_cache
-def get_repo() -> JsonQuoteRepository:
-    return JsonQuoteRepository()
-
-
-@lru_cache
-def get_sync() -> SyncService:
-    return SyncService(SyncLog())
-
-
-def get_tenant_loader():
-    return load_tenant
-
-
-def get_extraction_service() -> ExtractionService:
-    return ExtractionService()
-
-
-def get_menu_planner() -> MenuPlanner:
-    return MenuPlanner(get_catalog(), corrections=get_corrections())
-
-
-def get_engine() -> PricingEngine:
-    return PricingEngine(get_catalog())
-
-
-def get_edit_service() -> EditService:
-    return EditService(get_catalog())
-
-
-def get_tenant(
-    x_tenant_id: str = Header("demo"),
-    x_api_key: str | None = Header(None),
-    loader=Depends(get_tenant_loader),
-) -> TenantConfig:
-    tenant = loader(x_tenant_id)
-    if tenant is None:
-        raise HTTPException(status_code=404, detail=f"Unknown tenant '{x_tenant_id}'")
-    if tenant.api_key_env:
-        expected = os.environ.get(tenant.api_key_env, "")
-        if not expected or not x_api_key or not hmac.compare_digest(expected, x_api_key):
-            raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key")
-    return tenant
 
 
 # ---------- models ----------
@@ -144,8 +109,7 @@ ALLOWED_TRANSITIONS = {
 
 
 def _tiers(req, plan, catalog, engine) -> list[TierQuote]:
-    return [TierQuote(key=t.key, name=t.name, changes=t.changes, plan=t.plan, quote=t.quote)
-            for t in build_tiers(req, plan, catalog, engine)]
+    return tiers_for(req, plan, catalog, engine)
 
 
 def _get_quote(repo, tenant: TenantConfig, quote_id: str) -> StoredQuote:
@@ -188,12 +152,7 @@ def create_quote(body: MessageBody, tenant: TenantConfig = Depends(get_tenant),
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from e
     plan, _ = planner.plan(req)
-    q = repo.add(StoredQuote(
-        tenant_id=tenant.tenant_id, number=repo.next_number(tenant.tenant_id),
-        source_message=body.message, request=req, plan=plan,
-        tiers=_tiers(req, plan, catalog, engine),
-        history=[StatusChange(status=QuoteStatus.draft)],
-    ))
+    q = create_stored_quote(repo, tenant.tenant_id, req, plan, catalog, engine, body.message)
     return QuoteOut(quote=q, sync=sync.deliver(tenant, q, EventType.created))
 
 

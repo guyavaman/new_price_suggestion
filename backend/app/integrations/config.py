@@ -29,6 +29,7 @@ class AdapterType(StrEnum):
     webhook = "webhook"
     hubspot = "hubspot"
     monday = "monday"
+    internal = "internal"  # our own CRM
 
 
 class FieldMapping(BaseModel):
