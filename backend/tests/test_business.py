@@ -13,10 +13,7 @@ from app.business.operations import (
     run_automation,
     today_view,
 )
-from app.business.settings import SettingsService
-from app.catalog.service import CatalogService
 from app.crm.models import Actor, Deal, DealStage
-from app.crm.service import CrmService
 from app.deps import (
     get_catalog_service,
     get_crm,
@@ -25,35 +22,15 @@ from app.deps import (
     get_sync,
     get_tenant_loader,
 )
-from app.integrations.config import IntegrationConfig, TenantConfig
-from app.integrations.sync import SyncLog, SyncService
 from app.main import app
-from app.repositories.quotes import JsonQuoteRepository
 from app.schemas.extraction import ContactInfo, ExtractedRequest
 from app.schemas.quote import MenuLine, MenuPlan, QuoteStatus
-from app.services.portal import CustomerPortal, PortalError
+from app.services.portal import PortalError
 from app.services.pricing import PricingEngine
 from app.services.quotes import create_quote
 
 T = "acme"
 TODAY = date.today()
-
-
-@pytest.fixture
-def env(tmp_path):
-    settings = SettingsService(tmp_path)
-    crm = CrmService(tmp_path, settings)
-    catalog = CatalogService(tmp_path)
-    repo = JsonQuoteRepository(tmp_path / "quotes.json")
-    tenant = TenantConfig(tenant_id=T, name="Acme",
-                          integrations=[IntegrationConfig(id="crm", type="internal")])
-    from app.integrations.adapters.internal import InternalCrmAdapter
-    sync = SyncService(SyncLog(tmp_path / "sync.json"),
-                       lambda cfg: InternalCrmAdapter(cfg, crm=crm))
-    portal = CustomerPortal(repo, crm, catalog, settings, sync,
-                            lambda tid: tenant if tid == T else None)
-    return {"settings": settings, "crm": crm, "catalog": catalog, "repo": repo,
-            "sync": sync, "tenant": tenant, "portal": portal, "tmp": tmp_path}
 
 
 def make_quote(env, guests=100, days=30, meal="meat", created_days_ago=0):

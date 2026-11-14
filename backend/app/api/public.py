@@ -5,7 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from app.deps import get_portal
+from app.agent.service import ServiceContext
+from app.crm.models import ConversationStatus
+from app.deps import get_agent_builder, get_crm, get_portal, get_repo
 from app.services.portal import CustomerPortal, PortalError, PublicQuote
 
 router = APIRouter(prefix="/public", tags=["customer page"])
@@ -70,3 +72,49 @@ def demo_confirm(token: str, payment_id: str,
 @router.post("/quotes/{token}/decline", response_model=PublicQuote)
 def decline(token: str, body: DeclineIn, portal: CustomerPortal = Depends(get_portal)):
     return _run(portal.decline, token, body.reason)
+
+
+
+# ---------- customer-service chat on the quote page ----------
+
+class ServiceChatIn(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+
+
+class ServiceChatOut(BaseModel):
+    status: ConversationStatus | None = None
+    messages: list[dict] = Field(default_factory=list)
+    reply: str | None = None
+
+
+def _visible(conv) -> list[dict]:
+    return [{"role": m.role.value, "text": m.text, "by": m.by}
+            for m in conv.messages if m.text] if conv else []
+
+
+@router.get("/quotes/{token}/chat", response_model=ServiceChatOut)
+def service_history(token: str, repo=Depends(get_repo), crm=Depends(get_crm)):
+    q = repo.find_by_token(token)
+    if q is None:
+        raise HTTPException(404, "הקישור לא תקין")
+    convs = crm.conversations.list(q.tenant_id, lambda c: c.quote_id == q.id)
+    conv = max(convs, key=lambda c: c.updated_at) if convs else None
+    return ServiceChatOut(status=conv.status if conv else None, messages=_visible(conv))
+
+
+@router.post("/quotes/{token}/chat", response_model=ServiceChatOut)
+def service_chat(token: str, body: ServiceChatIn, repo=Depends(get_repo),
+                 portal: CustomerPortal = Depends(get_portal), build=Depends(get_agent_builder)):
+    """The link token identifies the customer: the agent answers about this booking only."""
+    q = repo.find_by_token(token)
+    if q is None:
+        raise HTTPException(404, "הקישור לא תקין")
+    try:
+        r = build(q.tenant_id).chat(q.tenant_id, body.message,
+                                    service=ServiceContext(quote=q, portal=portal))
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except Exception as e:  # model unavailable / no API key: the page keeps working without chat
+        raise HTTPException(503, "הצ'אט לא זמין כרגע. אפשר להתקשר אלינו.") from e
+    return ServiceChatOut(status=r.conversation.status, messages=_visible(r.conversation),
+                          reply=r.reply)

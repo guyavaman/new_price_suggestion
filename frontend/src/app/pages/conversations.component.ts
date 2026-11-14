@@ -33,6 +33,7 @@ import { Conversation } from '../core/models';
           <li [class.on]="sel()?.id === c.id" (click)="open(c.id)">
             <div class="row">
               <b>{{ preview(c) }}</b>
+              @if (c.quote_id) { <span class="pill svc" title="לקוח שכותב מעמוד ההצעה שלו">שירות</span> }
               @if (c.escalated && c.status !== 'closed') { <span class="pill hot">🔥 דחוף</span> }
               @else if (c.status === 'handed_off') { <span class="pill warn">ממתין לנציג</span> }
               @else if (c.status === 'human') { <span class="pill">נציג בשיחה</span> }
@@ -71,6 +72,7 @@ import { Conversation } from '../core/models';
     </div>
   `,
   styles: [`
+    .pill.svc { background: var(--olive-soft); color: var(--olive); }
     .filters { display: flex; gap: 6px; }
     .manual { margin-bottom: 14px; } .manual summary { cursor: pointer; font-weight: 700; color: var(--olive); }
     .manual form { display: grid; gap: 8px; margin-top: 10px; } .manual textarea { width: 100%; resize: vertical; }

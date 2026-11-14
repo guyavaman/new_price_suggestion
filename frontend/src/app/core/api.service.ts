@@ -3,8 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView,
-} from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -95,6 +94,8 @@ export class ApiService {
   acceptQuote(token: string, tier: string): Observable<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }> {
     return this.http.post<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }>(this.u(`/public/quotes/${token}/accept`), { tier });
   }
+  serviceChatHistory(token: string): Observable<ServiceChat> { return this.http.get<ServiceChat>(this.u(`/public/quotes/${token}/chat`)); }
+  serviceChat(token: string, message: string): Observable<ServiceChat> { return this.http.post<ServiceChat>(this.u(`/public/quotes/${token}/chat`), { message }); }
   declineQuote(token: string, reason: string): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/decline`), { reason }); }
   updateGuestCount(token: string, guests: number): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/guest-count`), { guests }); }
   paymentInfo(token: string, id: string): Observable<{ amount: number; status: string; business_name: string; quote_number: string; tier: string }> {

@@ -125,6 +125,28 @@ customer chat ─► Sales agent (Claude + tools) ─► CRM: customer, deal, ti
   CDK drag-and-drop, RTL.
 - **Live demo**: `demo/crm.html`, chat on one side and the CRM updating live on the other.
 
+### Customer service mode
+
+The same agent also serves customers who already have a quote. The chat on the customer's quote
+page runs in service mode: the link token identifies the customer, so Noa talks about that
+booking only, with a different prompt and toolset:
+
+```
+quote page chat ─► Noa, service mode (identified by the link token)
+                   │ get_booking         package, items, totals, deposit paid, balance (customer view)
+                   │ update_guest_count  final count via the portal's rules (approved, ≥2 days before)
+                   │ request_change      menu / allergy / logistics -> task for the owner, never applied
+                   │ get_invoice         link if issued, otherwise a task to send one
+                   └ handoff_to_human    complaints, refunds, discounts, a new event
+```
+
+- The owner writes the answers to common questions (kashrut, setup time, balance payment,
+  cancellations) in **Settings → שירות לקוחות**; anything not covered goes to a human.
+- No tool can change a price, give a discount or edit an approved menu. Allergies open an
+  urgent task. Service chats are marked "שירות" in the inbox, next to sales chats.
+- A service conversation can only be reached through its quote link (the public sales widget
+  can't open it by id). Nine service scenarios were added to the agent evals.
+
 ### Agent evals
 
 `evals/cases/agent.jsonl` holds 20 scripted customer conversations (happy path, budgets, English,

@@ -20,6 +20,7 @@ from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel, Field
 
+from app.agent.service import ServiceContext, ServiceTools, service_system
 from app.agent.signals import is_frustrated
 from app.business.settings import BusinessSettings
 from app.crm.models import (
@@ -112,12 +113,19 @@ class SalesAgent:
 
     # ================= public =================
     def chat(self, tenant: str, text: str, conversation_id: str | None = None,
-             today: date | None = None) -> AgentReply:
+             today: date | None = None, service: ServiceContext | None = None) -> AgentReply:
+        """One customer message. With `service` the customer is identified by their quote link
+        and the agent works in customer-service mode on that booking only."""
         text = text.strip()[:2000]
         if not text:
             raise ValueError("Empty message")
-        conv = (self.crm.conversations.get(tenant, conversation_id) if conversation_id else None) \
-            or Conversation(tenant_id=tenant)
+        if service:
+            conv = self.service_conversation(tenant, service.quote)
+        else:
+            conv = (self.crm.conversations.get(tenant, conversation_id)
+                    if conversation_id else None) or Conversation(tenant_id=tenant)
+            if conv.quote_id:  # a service chat can only be reached through its quote link
+                conv = Conversation(tenant_id=tenant)
         conv.messages.append(ChatMessage(role=ChatRole.user, text=text))
 
         frustrated = is_frustrated(text)
@@ -138,9 +146,16 @@ class SalesAgent:
         session = _Session(self, tenant, conv, today or date.today())
         history = [{"role": m.role.value, "content": m.text}
                    for m in conv.messages[-HISTORY_LIMIT:] if m.text]
-        system = SYSTEM_PROMPT.format(business=self.business, today=session.today.isoformat())
-        if conv.deal_id:
-            system += f"\nמה שכבר ידוע על האירוע (מה-CRM): {session.known()}"
+        if service:
+            tools = ServiceTools(session, service).tools()
+            system = service_system(self.business, session.today.isoformat(), service,
+                                    self.rules.service_info)
+        else:
+            tools = session.tools()
+            system = SYSTEM_PROMPT.format(business=self.business,
+                                          today=session.today.isoformat())
+            if conv.deal_id:
+                system += f"\nמה שכבר ידוע על האירוע (מה-CRM): {session.known()}"
         if conv.status == ConversationStatus.handed_off:
             task = self.crm.tasks.get(tenant, conv.handoff_task_id) if conv.handoff_task_id \
                 else None
@@ -148,13 +163,28 @@ class SalesAgent:
             system += HANDOFF_CONTEXT.format(reason=conv.handoff_reason or "", due=due)
         if frustrated:
             system += FRUSTRATION_CONTEXT
-        run = self.llm.run_agent(system=system, history=history, tools=session.tools(),
+        run = self.llm.run_agent(system=system, history=history, tools=tools,
                                  max_steps=8)
         reply = run.final_text or "סליחה, משהו השתבש אצלי. אפשר לנסות שוב?"
         out = self._finish(tenant, session.conv, reply, run.tool_calls)
         out.usage = {"input_tokens": run.input_tokens, "output_tokens": run.output_tokens,
                      "latency_ms": run.latency_ms, "stopped_early": run.stopped_early}
         return out
+
+    def service_conversation(self, tenant: str, quote) -> Conversation:
+        """The one service conversation of a quote (created on first message)."""
+        existing = self.crm.conversations.list(tenant, lambda c: c.quote_id == quote.id)
+        if existing:
+            return max(existing, key=lambda c: c.updated_at)
+        deal = next(iter(self.crm.deals.list(tenant, lambda d: quote.id in d.quote_ids)), None)
+        conv = Conversation(tenant_id=tenant, quote_id=quote.id,
+                            deal_id=deal.id if deal else None,
+                            customer_id=deal.customer_id if deal else None)
+        if deal:
+            self.crm.log(tenant, ActivityKind.chat,
+                         f"הלקוח פתח צ'אט שירות מעמוד ההצעה {quote.number}",
+                         Actor.customer, deal_id=deal.id)
+        return conv
 
     def _escalate(self, tenant: str, conv: Conversation, reason: str) -> None:
         """Raise priority on the existing handoff task (or open one) and flag the chat."""

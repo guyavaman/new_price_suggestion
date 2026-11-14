@@ -59,6 +59,14 @@ class BusinessSettings(BaseModel):
     followup_after_days: int = Field(2, ge=1, description="nudge an unanswered quote")
     final_count_days_before: int = Field(5, ge=1, description="ask for the final guest count")
     invoice_provider: str = Field("manual", description="manual | morning")
+    # customer service: what the agent may answer without asking the owner
+    service_info: str = Field(
+        "כשרות: בהשגחת הרבנות המקומית. תעודת כשרות נשלחת לפי בקשה.\n"
+        "הגעה: הצוות מגיע כשעתיים לפני תחילת האירוע להקמה.\n"
+        "יתרת תשלום: עד 3 ימים לפני האירוע, בהעברה בנקאית או בכרטיס אשראי.\n"
+        "שאריות: האוכל שנשאר נארז ונשאר אצל המארחים.\n"
+        "ביטול: עד 30 יום לפני האירוע המקדמה מוחזרת במלואה. אחר כך לפי שיחה עם בעל העסק.",
+        max_length=4000, description="Answers to common questions, written by the owner")
 
 
 class SettingsService:

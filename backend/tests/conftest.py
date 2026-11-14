@@ -35,3 +35,32 @@ def bar_mitzvah_plan():
         MenuLine(sku="BAR-OPEN", for_guests=120, source="requested", confidence="high"),
         MenuLine(sku="DRK-SOFT", for_guests=120, source="suggested", confidence="high"),
     ])
+
+
+@pytest.fixture
+def env(tmp_path):
+    """A whole tenant on disk: settings, CRM, catalog, quotes, sync to the built-in CRM, portal.
+    Tenant id "acme"."""
+    from app.business.settings import SettingsService
+    from app.catalog.service import CatalogService
+    from app.crm.service import CrmService
+    from app.integrations.adapters.internal import InternalCrmAdapter
+    from app.integrations.config import IntegrationConfig, TenantConfig
+    from app.integrations.sync import SyncLog, SyncService
+    from app.repositories.quotes import JsonQuoteRepository
+    from app.services.portal import CustomerPortal
+    T = "acme"
+    settings = SettingsService(tmp_path)
+    crm = CrmService(tmp_path, settings)
+    catalog = CatalogService(tmp_path)
+    repo = JsonQuoteRepository(tmp_path / "quotes.json")
+    tenant = TenantConfig(tenant_id=T, name="Acme",
+                          integrations=[IntegrationConfig(id="crm", type="internal")])
+    sync = SyncService(SyncLog(tmp_path / "sync.json"),
+                       lambda cfg: InternalCrmAdapter(cfg, crm=crm))
+    portal = CustomerPortal(repo, crm, catalog, settings, sync,
+                            lambda tid: tenant if tid == T else None)
+    return {"settings": settings, "crm": crm, "catalog": catalog, "repo": repo,
+            "sync": sync, "tenant": tenant, "portal": portal, "tmp": tmp_path}
+
+

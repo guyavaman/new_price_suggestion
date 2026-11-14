@@ -62,6 +62,11 @@ import { BusinessSettings } from '../core/models';
             <label class="span">כתובת דף הלקוח<input name="pb" dir="ltr" [(ngModel)]="s.public_base_url"></label>
           </div>
         </section>
+        <section class="card">
+          <h2>שירות לקוחות (נועה)</h2>
+          <p class="muted">לקוחות ששואלים בצ'אט שבעמוד ההצעה שלהם מקבלים תשובה מהמידע הזה. מה שלא כתוב כאן, נועה מעבירה אליך.</p>
+          <textarea name="si" rows="7" [(ngModel)]="s.service_info" placeholder="כשרות, שעות הגעה, תשלום יתרה, שאריות, ביטולים…"></textarea>
+        </section>
         <div class="bar"><button class="btn" [disabled]="saving()">{{ saving() ? 'שומר…' : 'שמירה' }}</button>
           @if (msg()) { <span [class.bad]="bad()">{{ msg() }}</span> }</div>
       </form>
@@ -69,6 +74,7 @@ import { BusinessSettings } from '../core/models';
   `,
   styles: [`
     form.grid { max-width: 920px; }
+    textarea { width: 100%; box-sizing: border-box; line-height: 1.6; resize: vertical; }
     h2 { margin-bottom: 10px; } h3 { font-size: 1rem; margin: 14px 0 6px; }
     .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
     label { display: grid; gap: 4px; font-size: .88rem; color: var(--muted); } label.span { grid-column: 1 / -1; }

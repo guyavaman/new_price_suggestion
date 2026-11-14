@@ -68,3 +68,16 @@ def test_invented_price_is_caught():
     r = run_case(case, LLMClient(model="t", client=SimpleNamespace(messages=script)), TODAY)
     bad = [c.name for c in r["score"].checks if not c.passed]
     assert bad == ["price_grounding"]
+
+
+def test_service_case_runs_on_a_booked_quote():
+    case = next(c for c in load_cases() if c["id"] == "service-final-count")
+    script = Script([
+        _resp([_tool("1", "update_guest_count", {"guests": 120})]),
+        _resp([_text("עדכנתי ל-120 אורחים, הסכום החדש מופיע בעמוד ההצעה.")]),
+    ])
+    llm = LLMClient(model="t", client=SimpleNamespace(messages=script))
+    r = run_case(case, llm, TODAY)
+    failed = [(c.name, c.detail) for c in r["score"].checks if not c.passed]
+    assert r["score"].passed and not r["score"].error, (failed, r["score"].error)
+    assert r["transcript"].deal["final_guest_count"] == 120

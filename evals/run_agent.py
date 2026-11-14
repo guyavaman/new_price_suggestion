@@ -39,13 +39,24 @@ from agent_metrics import (  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
 from app.agent.sales import SalesAgent  # noqa: E402
+from app.agent.service import ServiceContext  # noqa: E402
+from app.business.settings import SettingsService  # noqa: E402
 from app.catalog.loader import load_catalog  # noqa: E402
+from app.catalog.service import CatalogService  # noqa: E402
 from app.crm.models import Deal, DealStage  # noqa: E402
 from app.crm.service import CrmService  # noqa: E402
+from app.integrations.adapters.internal import InternalCrmAdapter  # noqa: E402
+from app.integrations.canonical import EventType  # noqa: E402
+from app.integrations.config import IntegrationConfig, TenantConfig  # noqa: E402
+from app.integrations.sync import SyncLog, SyncService  # noqa: E402
 from app.llm.client import LLMClient  # noqa: E402
 from app.repositories.quotes import JsonQuoteRepository  # noqa: E402
+from app.schemas.extraction import ContactInfo, ExtractedRequest  # noqa: E402
+from app.schemas.quote import MenuLine, MenuPlan  # noqa: E402
 from app.services.menu import MenuPlanner  # noqa: E402
+from app.services.portal import CustomerPortal  # noqa: E402
 from app.services.pricing import PricingEngine  # noqa: E402
+from app.services.quotes import create_quote  # noqa: E402
 
 CASES = ROOT / "evals" / "cases" / "agent.jsonl"
 RESULTS_DIR = ROOT / "evals" / "results"
@@ -67,6 +78,31 @@ def _setup(crm: CrmService, setup: dict) -> None:
                                guest_count=booked.get("guests", 100), stage=DealStage.won))
 
 
+def _service_setup(tmp: Path, crm: CrmService, repo, catalog, engine, svc: dict,
+                   today: date) -> ServiceContext:
+    """A customer with a quote (approved + deposit paid unless status says otherwise),
+    chatting from their quote page."""
+    settings, catalogs = SettingsService(tmp), CatalogService(tmp)
+    tenant = TenantConfig(tenant_id=TENANT, name="eval",
+                          integrations=[IntegrationConfig(id="crm", type="internal")])
+    sync = SyncService(SyncLog(tmp / "sync.json"), lambda cfg: InternalCrmAdapter(cfg, crm=crm))
+    portal = CustomerPortal(repo, crm, catalogs, settings, sync, lambda t: tenant)
+    guests = svc.get("guests", 100)
+    req = ExtractedRequest(language="he", event_type="bar_bat_mitzvah", guest_count=guests,
+                           event_date=date.fromisoformat(svc["date"]), meal_type="meat",
+                           kashrut="kosher", service={"waiters": True},
+                           contact=ContactInfo(name="דנה כהן", phone="0521234567"))
+    plan = MenuPlan(lines=[MenuLine(sku="PKG-MEAT-STD", for_guests=guests),
+                           MenuLine(sku="CAN-SKEWER-CHICK", for_guests=guests),
+                           MenuLine(sku="DRK-SOFT", for_guests=guests)])
+    q = create_quote(repo, TENANT, req, plan, catalog, engine, "eval")
+    sync.deliver(tenant, q, EventType.created)
+    if svc.get("status", "approved") == "approved":
+        r = portal.accept(q.public_token, "recommended", today)
+        portal.confirm_payment(q.public_token, r["payment_id"])
+    return ServiceContext(quote=repo.get(TENANT, q.id), portal=portal)
+
+
 def run_case(case: dict, llm: LLMClient, today: date, use_planner: bool = False) -> dict:
     catalog = load_catalog()
     engine = PricingEngine(catalog)
@@ -74,7 +110,12 @@ def run_case(case: dict, llm: LLMClient, today: date, use_planner: bool = False)
     with tempfile.TemporaryDirectory() as tmp:
         crm = CrmService(Path(tmp))
         repo = JsonQuoteRepository(Path(tmp) / "quotes.json")
-        _setup(crm, render_obj(case.get("setup", {}), today))
+        setup = render_obj(case.get("setup", {}), today)
+        _setup(crm, setup)
+        service = None
+        if setup.get("service"):
+            service = _service_setup(Path(tmp), crm, repo, catalog, engine, setup["service"],
+                                     today)
         planner = None
         if use_planner:
             mp = MenuPlanner(catalog, llm)
@@ -87,7 +128,9 @@ def run_case(case: dict, llm: LLMClient, today: date, use_planner: bool = False)
         try:
             for msg in case["turns"]:
                 text = render(msg, today)
-                r = agent.chat(TENANT, text, conv_id, today=today)
+                if service:  # the quote page identifies the customer; refresh the snapshot
+                    service.quote = repo.get(TENANT, service.quote.id)
+                r = agent.chat(TENANT, text, conv_id, today=today, service=service)
                 conv_id = r.conversation.id
                 if r.reply:
                     replies.append(r.reply)
@@ -118,6 +161,7 @@ def run_case(case: dict, llm: LLMClient, today: date, use_planner: bool = False)
             status=conv.status.value if conv else "none",
             quote_lines=quote_lines,
             escalated=bool(conv and conv.escalated),
+            tasks=[x.title for x in crm.tasks.list(TENANT) if not x.done],
         )
     expected = render_obj(case.get("expected", {}), today)
     score = score_case(case["id"], expected, transcript)

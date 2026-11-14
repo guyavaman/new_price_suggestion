@@ -1,9 +1,9 @@
-import { Component, computed, inject, input, signal, effect } from '@angular/core';
+import { Component, ElementRef, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
 import { CUSTOMER_REJECT_REASONS, KASHRUT, MEAL, UNIT } from '../core/labels';
-import { PublicQuote } from '../core/models';
+import { PublicQuote, ServiceChat } from '../core/models';
 
 /** What the customer sees from the link: pick a package, approve, pay the deposit. */
 @Component({
@@ -77,8 +77,40 @@ import { PublicQuote } from '../core/models';
         }
       }
     </div>
+
+    @if (q()) {
+      @if (chatOpen()) {
+        <section class="chat card" aria-label="צ'אט עם נועה">
+          <header><b>נועה · שירות לקוחות</b><button class="x" type="button" aria-label="סגירה" (click)="chatOpen.set(false)">✕</button></header>
+          <div class="msgs" #msgs>
+            @if (!chat().length) { <p class="bubble ai">היי! אני נועה 👋 אפשר לשאול אותי על ההזמנה: מה כלול, כמה נשאר לשלם, לעדכן מספר אורחים או לבקש שינוי.</p> }
+            @for (m of chat(); track $index) { <p class="bubble" [class.ai]="m.role === 'assistant'" [class.human]="m.by === 'human'">{{ m.text }}</p> }
+            @if (sending()) { <p class="bubble ai typing">…</p> }
+            @if (chatError()) { <p class="err small">{{ chatError() }}</p> }
+          </div>
+          <form (ngSubmit)="send()">
+            <input name="cm" [(ngModel)]="draft" placeholder="כתבו הודעה…" aria-label="הודעה" autocomplete="off">
+            <button class="btn" [disabled]="sending() || !draft.trim()">שליחה</button>
+          </form>
+        </section>
+      } @else {
+        <button class="fab btn" type="button" (click)="openChat()">שאלה על ההזמנה? 💬</button>
+      }
+    }
   `,
   styles: [`
+    .fab { position: fixed; bottom: 18px; left: 18px; border-radius: 99px; padding: 12px 18px; box-shadow: 0 6px 20px rgba(0,0,0,.18); z-index: 20; }
+    .chat { position: fixed; bottom: 18px; left: 18px; width: min(380px, calc(100vw - 36px)); height: min(540px, calc(100vh - 36px)); display: flex; flex-direction: column; padding: 0; overflow: hidden; z-index: 20; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+    .chat header { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: var(--olive); color: #fff; border: 0; margin: 0; }
+    .chat .x { background: none; border: 0; color: #fff; font-size: 1rem; cursor: pointer; }
+    .msgs { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+    .bubble { margin: 0; padding: 8px 12px; border-radius: 14px; max-width: 85%; white-space: pre-wrap; line-height: 1.5; align-self: flex-start; background: var(--olive); color: #fff; }
+    .bubble.ai { align-self: flex-end; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+    .bubble.human { border-color: var(--honey); }
+    .typing { opacity: .6; }
+    .chat form { display: flex; gap: 6px; padding: 10px; border-top: 1px solid var(--line); }
+    .chat form input { flex: 1; min-width: 0; }
+
     .wrap { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; }
     header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--olive); padding-bottom: 10px; margin-bottom: 18px; }
     header div { display: grid; } .biz { font-family: var(--display); font-size: 1.5rem; color: var(--olive); }
@@ -111,6 +143,8 @@ export class CustomerQuoteComponent {
   error = signal('');
   guests: number | null = null;
   meal = MEAL; kashrut = KASHRUT; unit = UNIT;
+  chatOpen = signal(false); chat = signal<ServiceChat['messages']>([]); sending = signal(false); chatError = signal(''); draft = '';
+  private msgs = viewChild<ElementRef<HTMLElement>>('msgs');
   declining = signal(false); reason = ''; reasons = CUSTOMER_REJECT_REASONS;
   selected = computed(() => this.q()?.tiers.find((t) => t.key === this.pick()));
   chosen = computed(() => { const q = this.q(); return q?.tiers.find((t) => t.key === q.selected_tier); });
@@ -129,6 +163,21 @@ export class CustomerQuoteComponent {
       error: (e) => { this.busy.set(false); this.error.set(e.error?.detail ?? 'משהו השתבש, נסו שוב'); },
     });
   }
+  openChat() {
+    this.chatOpen.set(true);
+    this.api.serviceChatHistory(this.token()).subscribe({ next: (r) => { this.chat.set(r.messages); this.scroll(); } });
+  }
+  send() {
+    const text = this.draft.trim();
+    if (!text) return;
+    this.draft = ''; this.chatError.set(''); this.sending.set(true);
+    this.chat.update((m) => [...m, { role: 'user', text, by: 'customer' }]); this.scroll();
+    this.api.serviceChat(this.token(), text).subscribe({
+      next: (r) => { this.sending.set(false); this.chat.set(r.messages); this.scroll(); this.load(this.token()); },
+      error: (e) => { this.sending.set(false); this.chatError.set(e.error?.detail ?? 'ההודעה לא נשלחה, נסו שוב'); },
+    });
+  }
+  private scroll() { setTimeout(() => { const el = this.msgs()?.nativeElement; if (el) el.scrollTop = el.scrollHeight; }); }
   decline() {
     this.busy.set(true);
     this.api.declineQuote(this.token(), this.reason.trim()).subscribe({

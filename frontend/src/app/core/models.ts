@@ -82,6 +82,7 @@ export interface Conversation {
   handoff_reason: string | null;
   customer_id: string | null;
   deal_id: string | null;
+  quote_id?: string | null;
   messages: ChatMessage[];
   lead_score: number;
   updated_at: string;
@@ -190,7 +191,7 @@ export interface BusinessSettings {
   canapes_per_guest: number; volume_discounts: { min_subtotal: number; rate: number }[]; remote_areas: string[];
   max_events_per_day: number; max_guests_per_day: number; quote_valid_days: number; deposit_rate: number;
   payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
-  invoice_provider: string;
+  invoice_provider: string; service_info: string;
 }
 export interface PublicQuote {
   business_name: string; business_phone: string; number: string; status: string; customer_name: string | null;
@@ -200,3 +201,5 @@ export interface PublicQuote {
   selected_tier: string; valid_until: string; expired: boolean; deposit_rate: number; deposit_paid: number;
   can_accept: boolean; can_update_count: boolean; final_guest_count: number | null;
 }
+
+export interface ServiceChat { status: Conversation['status'] | null; messages: { role: 'user' | 'assistant'; text: string; by: string }[]; reply?: string | null; }

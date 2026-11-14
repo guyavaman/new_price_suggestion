@@ -128,3 +128,18 @@ def get_portal(repo=Depends(get_repo), crm: CrmService = Depends(get_crm),
                sync: SyncService = Depends(get_sync),
                loader=Depends(get_tenant_loader)) -> CustomerPortal:
     return CustomerPortal(repo, crm, catalog, settings, sync, loader)
+
+
+def get_agent_builder(crm: CrmService = Depends(get_crm),
+                      catalogs: CatalogService = Depends(get_catalog_service),
+                      settings: SettingsService = Depends(get_settings_service),
+                      corrections: CorrectionStore = Depends(get_corrections),
+                      repo=Depends(get_repo)):
+    """Build the agent for a tenant known only from data (a quote link), not from a header."""
+    def build(tenant_id: str) -> SalesAgent:
+        catalog, rules = catalogs.items(tenant_id), settings.get(tenant_id)
+        planner = MenuPlanner(catalog, corrections=corrections)
+        return SalesAgent(crm, catalog, PricingEngine(catalog, rules=rules), repo,
+                          planner=lambda req: planner.plan(req)[0],
+                          business_name=rules.business_name, rules=rules)
+    return build

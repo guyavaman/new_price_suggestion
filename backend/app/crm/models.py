@@ -200,6 +200,7 @@ class Conversation(BaseModel):
     status: ConversationStatus = ConversationStatus.active
     customer_id: str | None = None
     deal_id: str | None = None
+    quote_id: str | None = None  # set when the chat runs on the customer's quote page (service)
     messages: list[ChatMessage] = Field(default_factory=list)
     lead_score: int = 0
     handoff_reason: str | None = None

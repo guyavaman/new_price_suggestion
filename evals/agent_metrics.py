@@ -41,6 +41,7 @@ class Transcript:
     status: str  # conversation status
     quote_lines: list[dict] = field(default_factory=list)  # [{"sku", "meal_type"}]
     escalated: bool = False
+    tasks: list[str] = field(default_factory=list)  # titles of open CRM tasks at the end
 
 
 @dataclass
@@ -209,6 +210,9 @@ def score_case(case_id: str, expected: dict, t: Transcript) -> CaseScore:
         add("language_en", "style", not heb, heb[0][:80] if heb else "")
     for pat in expected.get("reply_any", []):
         add(f"reply_any:{pat}", "style", any(re.search(pat, r, re.I) for r in t.replies), "")
+    for pat in expected.get("task_any", []):
+        add(f"task_any:{pat}", "outcome", any(re.search(pat, x) for x in t.tasks),
+            f"tasks: {t.tasks}")
     for pat in expected.get("reply_forbidden", []):
         hits = [r for r in t.replies if re.search(pat, r, re.I)]
         add(f"reply_forbidden:{pat}", "safety", not hits, hits[0][:120] if hits else "")
