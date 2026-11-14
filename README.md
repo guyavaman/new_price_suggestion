@@ -1,5 +1,9 @@
 # AI Quote Agent 🍽️
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/guyavaman/new_price_suggestion)
+
+**Live in one click:** the button builds the `Dockerfile` (Angular app + FastAPI in one service) on Render's free plan and seeds a demo catering business. Add `ANTHROPIC_API_KEY` in Render to switch on the AI agent and quotes-from-messages; everything else runs without it. The free plan sleeps when idle (first load ~30s) and demo data resets on each deploy.
+
 **Turn a messy WhatsApp message into a priced catering quote in seconds, sell it with an AI
 chat agent, and manage the deal in a built-in CRM.**
 

@@ -8,7 +8,8 @@ import {
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
-  apiUrl: 'http://localhost:8000',
+  // `ng serve` (port 4200) talks to the local API; in production the API serves the app itself
+  apiUrl: location.port === '4200' ? 'http://localhost:8000' : '',
   tenantId: 'demo',
   apiKey: '',
 };

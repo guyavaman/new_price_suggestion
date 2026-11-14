@@ -1,9 +1,10 @@
 import os
 from datetime import date
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from app.api import agent as agent_api
@@ -277,3 +278,45 @@ def add_review(r: Review, store: CorrectionStore = Depends(get_corrections)) -> 
 @app.get("/metrics/accuracy")
 def accuracy(store: CorrectionStore = Depends(get_corrections)) -> list[dict]:
     return store.accuracy_series()
+
+
+# ---------- one-service deploy: demo data + the Angular app from the same origin ----------
+
+@app.on_event("startup")
+def _seed_demo() -> None:
+    if os.environ.get("SEED_DEMO") == "1" and not get_crm().deals.list("demo"):
+        from scripts.seed_crm import seed
+        seed(reset=True)
+
+
+FRONTEND_DIST = Path(os.environ.get(
+    "FRONTEND_DIST", Path(__file__).resolve().parents[2] / "frontend" / "dist" / "crm" / "browser"))
+
+if FRONTEND_DIST.is_dir():
+    API_DOCS = ("/docs", "/redoc", "/openapi.json")
+    # same URL can be a page or JSON: tell the browser cache the two must never be mixed up
+    _NO_MIX = {"Vary": "Accept", "Cache-Control": "no-cache"}
+
+    def _index() -> FileResponse:
+        return FileResponse(FRONTEND_DIST / "index.html", headers=_NO_MIX)
+
+    @app.middleware("http")
+    async def spa_navigation(request, call_next):
+        """A browser *navigation* (Accept: text/html) always gets the Angular app, even where a
+        page and an API route share a path (/settings, /quotes, /kitchen). API calls from the app
+        send Accept: application/json and reach the API as usual."""
+        if (request.method == "GET" and "text/html" in request.headers.get("accept", "")
+                and not request.url.path.startswith(API_DOCS)):
+            return _index()
+        response = await call_next(request)
+        response.headers["Vary"] = "Accept"
+        return response
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str) -> FileResponse:
+        """Serve the built Angular app; unknown paths fall back to index.html (client routing).
+        Registered last, so every API route above takes precedence."""
+        f = (FRONTEND_DIST / path).resolve()
+        if path and f.is_file() and FRONTEND_DIST.resolve() in f.parents:
+            return FileResponse(f)
+        return _index()

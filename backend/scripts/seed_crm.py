@@ -68,8 +68,11 @@ CHAT = [
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--reset", action="store_true")
-    args = p.parse_args()
-    if args.reset:
+    seed(reset=p.parse_args().reset)
+
+
+def seed(reset: bool = False) -> None:
+    if reset:
         for f in [*STORE_DIR.glob("crm_*.json"), STORE_DIR / "quotes.json"]:
             f.unlink(missing_ok=True)
     crm = CrmService()

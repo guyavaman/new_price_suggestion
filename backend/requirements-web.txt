@@ -1,0 +1,7 @@
+# Runtime for the deployed app (no embeddings/pgvector: the demo uses the JSON store)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.8
+pydantic-settings>=2.4
+anthropic>=0.40
+httpx>=0.27

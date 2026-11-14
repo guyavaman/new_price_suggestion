@@ -7,6 +7,7 @@ Defaults match a typical small kosher caterer and are what tests assume.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -50,8 +51,10 @@ class BusinessSettings(BaseModel):
     quote_valid_days: int = Field(14, ge=1, le=90)
     deposit_rate: float = Field(0.3, ge=0, le=1, description="share of total paid to confirm")
     payment_provider: str = Field("demo", description="demo | grow | ... (see payments.py)")
-    public_base_url: str = Field("http://localhost:4200",
-                                 description="Where the customer quote page is served")
+    public_base_url: str = Field(
+        default_factory=lambda: os.environ.get("PUBLIC_BASE_URL")
+        or os.environ.get("RENDER_EXTERNAL_URL") or "http://localhost:4200",
+        description="Where the customer quote page is served")
     # automation
     followup_after_days: int = Field(2, ge=1, description="nudge an unanswered quote")
     final_count_days_before: int = Field(5, ge=1, description="ask for the final guest count")

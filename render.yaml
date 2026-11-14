@@ -1,0 +1,13 @@
+# Render Blueprint: one free web service running the Dockerfile.
+services:
+  - type: web
+    name: zit-dvash-catering
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: SEED_DEMO
+        value: "1"
+      - key: ANTHROPIC_API_KEY
+        sync: false   # paste your key in Render to enable the AI agent and quotes from messages
