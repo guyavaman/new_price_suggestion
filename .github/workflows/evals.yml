@@ -1,0 +1,57 @@
+name: AI evals (real model)
+
+# Runs the eval sets against the real Claude API. Manual only: it costs API credit.
+# Needs the repository secret ANTHROPIC_API_KEY (Settings -> Secrets and variables -> Actions).
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "smoke (~18 cases, well under $1) or full (71 cases)"
+        type: choice
+        options: [smoke, full]
+        default: smoke
+      model:
+        description: "Model id (empty = the app's default)"
+        type: string
+        default: ""
+
+env:
+  SMOKE_EXTRACTION: he-001,he-002,he-003,he-004,he-005,he-006,en-001,mix-001
+  SMOKE_AGENT: happy-bar-mitzvah,discount-request,prompt-injection,complaint,service-balance,service-final-count,service-allergy,service-discount-after-approval,service-faq,service-prompt-injection
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      AI_DAILY_CALLS: "0"  # the app's daily cap is for the public site, not for evals
+      LLM_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r backend/requirements-web.txt
+      - name: Check the API key is set
+        run: test -n "$ANTHROPIC_API_KEY" || (echo "::error::Add the ANTHROPIC_API_KEY repository secret" && exit 1)
+      - name: Extraction evals (message -> structured request)
+        run: |
+          ONLY=""; [ "${{ inputs.suite }}" = "smoke" ] && ONLY="--only $SMOKE_EXTRACTION"
+          python evals/run_extraction.py $ONLY --price-in 2 --price-out 10 | tee extraction.txt
+      - name: Agent evals (sales + customer service conversations)
+        if: always()
+        run: |
+          ONLY=""; [ "${{ inputs.suite }}" = "smoke" ] && ONLY="--only $SMOKE_AGENT"
+          python evals/run_agent.py $ONLY --price-in 2 --price-out 10 | tee agent.txt
+      - name: Summary
+        if: always()
+        run: |
+          { echo "## Extraction"; echo '```'; tail -n 40 extraction.txt 2>/dev/null; echo '```';
+            echo "## Agent"; echo '```'; tail -n 60 agent.txt 2>/dev/null; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: eval-results
+          path: evals/results/
+          retention-days: 30
