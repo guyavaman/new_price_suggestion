@@ -6,6 +6,7 @@ SQLAlchemy/Postgres later means re-implementing five methods, not touching busin
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -15,7 +16,9 @@ from pydantic import BaseModel, TypeAdapter
 
 T = TypeVar("T", bound=BaseModel)
 
-STORE_DIR = Path(__file__).resolve().parents[3] / "data" / "store"
+# STORE_DIR env var moves all runtime data (used by the browser tests to run on a throwaway copy)
+_DEFAULT_STORE = Path(__file__).resolve().parents[3] / "data" / "store"
+STORE_DIR = Path(os.environ.get("STORE_DIR") or _DEFAULT_STORE)
 _locks: dict[Path, threading.RLock] = {}
 
 

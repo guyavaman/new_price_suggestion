@@ -16,10 +16,11 @@ from typing import Protocol
 
 from pydantic import BaseModel, Field
 
+from app.repositories.store import STORE_DIR
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import MenuPlan, QuoteStatus, TierQuote
 
-DEFAULT_PATH = Path(__file__).resolve().parents[3] / "data" / "store" / "quotes.json"
+DEFAULT_PATH = STORE_DIR / "quotes.json"
 
 
 def _now() -> datetime:

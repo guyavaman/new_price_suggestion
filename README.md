@@ -169,6 +169,23 @@ python evals/run_agent.py --judge              # + LLM-as-judge conversation qua
 python evals/run_agent.py --only discount-request,prompt-injection
 ```
 
+## Browser tests (Playwright)
+
+`frontend/e2e/` covers the paths a customer or the owner actually walks, in Chromium against
+the real API serving the production build, on a throwaway copy of the seeded demo business:
+
+- every owner screen opened directly by URL (catches a page getting JSON instead of the app)
+- customer picks a package → demo deposit payment → the event is booked
+- final guest count from the customer page, re-priced
+- rejection with a reason, by the owner and by the customer
+- the service chat on the quote page (model mocked), and the "chat unavailable" fallback
+
+```bash
+cd frontend && npx ng build && npx playwright test     # ~20s, 17 tests
+```
+
+CI runs them on every push and keeps the trace of any failure.
+
 ## CRM integration
 
 Built to drop into whatever CRM a business already uses, without touching the core:

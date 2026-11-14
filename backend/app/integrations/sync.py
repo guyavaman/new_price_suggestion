@@ -22,8 +22,9 @@ from app.integrations.base import ExternalRefs, SyncResult
 from app.integrations.canonical import EventType, QuoteEvent, build_event
 from app.integrations.config import IntegrationConfig, TenantConfig
 from app.repositories.quotes import StoredQuote
+from app.repositories.store import STORE_DIR
 
-DEFAULT_LOG = Path(__file__).resolve().parents[3] / "data" / "store" / "sync_log.json"
+DEFAULT_LOG = STORE_DIR / "sync_log.json"
 
 
 class SyncRecord(BaseModel):
