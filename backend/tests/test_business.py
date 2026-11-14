@@ -273,3 +273,28 @@ def test_public_and_owner_api(env):
         assert isinstance(c.post("/automation/run", headers=h).json(), list)
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------- rejection reasons ----------
+
+def test_customer_decline_reason_reaches_deal(env):
+    q, deal = make_quote(env)
+    v = env["portal"].decline(q.public_token, "המחיר גבוה מדי")
+    assert v.status == "rejected" and not v.can_accept
+    d = env["crm"].deals.get(T, deal.id)
+    assert d.stage == "lost" and d.lost_reason == "המחיר גבוה מדי"
+    assert any("המחיר גבוה מדי" in t.title for t in env["crm"].tasks.list(T))
+    with pytest.raises(PortalError):
+        env["portal"].decline(q.public_token, "שוב")
+
+
+def test_owner_rejection_note_becomes_lost_reason(env):
+    from app.integrations.canonical import EventType
+    from app.repositories.quotes import StatusChange
+    from app.schemas.quote import QuoteStatus
+    q, deal = make_quote(env)
+    q.status = QuoteStatus.rejected
+    q.history.append(StatusChange(status=QuoteStatus.rejected, note="בחרו ספק אחר"))
+    q = env["repo"].save(q)
+    env["sync"].deliver(env["tenant"], q, EventType.rejected)
+    assert env["crm"].deals.get(T, deal.id).lost_reason == "בחרו ספק אחר"

@@ -130,6 +130,28 @@ class CustomerPortal:
             final_guest_count=deal.final_guest_count if deal else None,
         )
 
+    # ---------- decline ----------
+    def decline(self, token: str, reason: str, today: date | None = None) -> PublicQuote:
+        """The customer says no, and why. The reason lands on the deal (lost_reason) and a
+        follow-up task is opened: a "too expensive" today is often a smaller package tomorrow."""
+        reason = (reason or "").strip()[:300]
+        if not reason:
+            raise PortalError("נשמח לדעת מה הסיבה", 422)
+        q = self._quote(token)
+        if q.status not in (QuoteStatus.draft, QuoteStatus.sent):
+            raise PortalError("אי אפשר לדחות הצעה שכבר אושרה או נסגרה")
+        q.status = QuoteStatus.rejected
+        q.history.append(StatusChange(status=QuoteStatus.rejected, note=reason))
+        q = self.repo.save(q)
+        self._emit(q, EventType.rejected)
+        deal = self._deal(q)
+        if deal:
+            self.crm.log(q.tenant_id, ActivityKind.quote, f"הלקוח דחה את ההצעה: {reason}",
+                         Actor.customer, deal_id=deal.id)
+            self.crm.add_task(q.tenant_id, f"הלקוח דחה ({reason}) — שווה שיחה קצרה",
+                              deal_id=deal.id)
+        return self.view(token, today)
+
     # ---------- accept + deposit ----------
     def accept(self, token: str, tier: str, today: date | None = None) -> dict:
         v = self.view(token, today)

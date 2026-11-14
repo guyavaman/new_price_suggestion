@@ -2,7 +2,7 @@ import { Component, computed, inject, input, signal, effect } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
-import { KASHRUT, MEAL, UNIT } from '../core/labels';
+import { CUSTOMER_REJECT_REASONS, KASHRUT, MEAL, UNIT } from '../core/labels';
 import { PublicQuote } from '../core/models';
 
 /** What the customer sees from the link: pick a package, approve, pay the deposit. */
@@ -59,7 +59,21 @@ import { PublicQuote } from '../core/models';
               @if (q.deposit_rate > 0) { <div class="muted">לאישור משלמים מקדמה של {{ selected()?.deposit | ils }} ({{ q.deposit_rate * 100 }}%). היתרה לפני האירוע.</div> }</div>
             <button class="btn big" [disabled]="busy()" (click)="accept()">{{ busy() ? 'רגע…' : q.deposit_rate > 0 ? 'אישור ותשלום מקדמה' : 'אישור ההצעה' }}</button>
           </div>
-          <p class="muted small">ההצעה בתוקף עד {{ q.valid_until | heDate }}</p>
+          <p class="muted small">ההצעה בתוקף עד {{ q.valid_until | heDate }}
+            · <button class="link" type="button" (click)="declining.set(!declining())">ההצעה לא מתאימה לנו</button></p>
+          @if (declining()) {
+            <form class="card decline" (ngSubmit)="decline()">
+              <b>חבל! נשמח לדעת למה, כדי שנוכל להשתפר:</b>
+              <div class="chips">@for (r of reasons; track r) { <button type="button" class="chip" [class.on]="reason === r" (click)="reason = r">{{ r }}</button> }</div>
+              <div class="row">
+                <input name="why" [(ngModel)]="reason" placeholder="או כתבו לנו במילים שלכם" aria-label="סיבה">
+                <button class="btn" [disabled]="busy() || !reason.trim()">שליחה</button>
+              </div>
+            </form>
+          }
+        }
+        @if (q.status === 'rejected') {
+          <div class="note">תודה שעדכנתם. אם משהו ישתנה, נשמח לבנות לכם הצעה חדשה: {{ q.business_phone }}</div>
         }
       }
     </div>
@@ -72,6 +86,9 @@ import { PublicQuote } from '../core/models';
     .note { background: var(--olive-soft); border-radius: 10px; padding: 12px 14px; }
     .done { background: var(--ok-soft); color: var(--ok); border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
     .count { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; } .count input { width: 110px; }
+    .decline { display: grid; gap: 10px; margin-top: 10px; } .decline .row { display: flex; gap: 8px; flex-wrap: wrap; } .decline input { flex: 1; min-width: 200px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; } .chip.on { background: var(--olive-soft); border-color: var(--olive); }
+    .link { background: none; border: 0; padding: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font: inherit; }
     .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
     @media (max-width: 760px) { .tiers { grid-template-columns: 1fr; } }
     .tier { text-align: start; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 4px; align-content: start; color: var(--ink); }
@@ -94,6 +111,7 @@ export class CustomerQuoteComponent {
   error = signal('');
   guests: number | null = null;
   meal = MEAL; kashrut = KASHRUT; unit = UNIT;
+  declining = signal(false); reason = ''; reasons = CUSTOMER_REJECT_REASONS;
   selected = computed(() => this.q()?.tiers.find((t) => t.key === this.pick()));
   chosen = computed(() => { const q = this.q(); return q?.tiers.find((t) => t.key === q.selected_tier); });
 
@@ -108,6 +126,13 @@ export class CustomerQuoteComponent {
     this.busy.set(true);
     this.api.acceptQuote(this.token(), this.pick()).subscribe({
       next: (r) => { if (r.checkout_url) location.href = r.checkout_url; else { this.busy.set(false); this.load(this.token()); } },
+      error: (e) => { this.busy.set(false); this.error.set(e.error?.detail ?? 'משהו השתבש, נסו שוב'); },
+    });
+  }
+  decline() {
+    this.busy.set(true);
+    this.api.declineQuote(this.token(), this.reason.trim()).subscribe({
+      next: (q) => { this.busy.set(false); this.declining.set(false); this.q.set(q); },
       error: (e) => { this.busy.set(false); this.error.set(e.error?.detail ?? 'משהו השתבש, נסו שוב'); },
     });
   }

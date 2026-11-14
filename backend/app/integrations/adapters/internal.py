@@ -51,7 +51,11 @@ class InternalCrmAdapter:
         if stage == DealStage.quoted and deal.stage != DealStage.new:
             stage = None  # never move a won/completed deal back to "quoted"
         if stage:
-            reason = "הלקוח דחה את ההצעה" if stage == DealStage.lost else None
+            reason = None
+            if stage == DealStage.lost:
+                expired = event.type == EventType.expired
+                default = "פג תוקף ההצעה" if expired else "הלקוח דחה את ההצעה"
+                reason = deal_info.status_note or default
             deal = self.crm.move_stage(t, deal.id, stage, Actor.system, reason)
         if event.type == EventType.approved:
             self.crm.log(t, ActivityKind.quote,

@@ -15,6 +15,10 @@ class AcceptIn(BaseModel):
     tier: str = Field(..., pattern="^(basic|recommended|premium)$")
 
 
+class DeclineIn(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=300)
+
+
 class CountIn(BaseModel):
     guests: int = Field(..., ge=1, le=5000)
 
@@ -61,3 +65,8 @@ def demo_confirm(token: str, payment_id: str,
         if p.provider != "demo":
             raise HTTPException(403, "Only demo payments can be confirmed here")
     return _run(portal.confirm_payment, token, payment_id, "demo")
+
+
+@router.post("/quotes/{token}/decline", response_model=PublicQuote)
+def decline(token: str, body: DeclineIn, portal: CustomerPortal = Depends(get_portal)):
+    return _run(portal.decline, token, body.reason)

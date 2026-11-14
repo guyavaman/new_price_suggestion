@@ -101,6 +101,8 @@ class Deal(BaseModel):
     meal_type: str | None = None
     dietary_summary: str | None = None
     notes: str | None = None
+    status_note: str | None = Field(
+        None, description="Why the status changed, e.g. the customer's reason for rejecting")
     created_at: datetime
     updated_at: datetime
 
@@ -153,6 +155,11 @@ def _title(q: StoredQuote) -> str:
     return " · ".join(parts)
 
 
+def _status_note(q: StoredQuote) -> str | None:
+    last = q.history[-1] if q.history else None
+    return last.note if last and last.status == q.status else None
+
+
 def build_event(q: StoredQuote, event_type: EventType) -> QuoteEvent:
     r, tier = q.request, q.tier()
     pq = tier.quote
@@ -179,6 +186,7 @@ def build_event(q: StoredQuote, event_type: EventType) -> QuoteEvent:
             kashrut=r.kashrut.value if r.kashrut else None,
             meal_type=r.meal_type.value if r.meal_type else None,
             dietary_summary=dietary, notes=tier.plan.cover_note or None,
+            status_note=_status_note(q),
             created_at=q.created_at, updated_at=q.updated_at,
         ),
         line_items=[

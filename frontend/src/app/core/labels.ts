@@ -39,3 +39,8 @@ export const QUOTE_STATUS: Record<string, string> = {
 export const UNIT: Record<string, string> = { per_guest: 'לסועד', unit: "יח'", tray: 'מגש', kg: 'ק"ג', hour: 'שעות' };
 export const LINE_SOURCE: Record<string, string> = { requested: 'ביקש הלקוח', suggested: 'הצעת AI', rule: 'אוטומטי' };
 export const CONFIDENCE: Record<string, string> = { high: 'גבוהה', medium: 'לבדיקה', low: 'לא ודאי', rule: 'כלל' };
+
+/** Common reasons a quote is turned down: one tap for the owner or the customer, free text for the rest. */
+export const REJECT_REASONS = ['המחיר גבוה מדי', 'התאריך לא מתאים', 'בחרו ספק אחר', 'התפריט לא מתאים', 'האירוע בוטל או נדחה'];
+/** Same reasons, worded for the customer. Stored as written so the owner sees the customer's words. */
+export const CUSTOMER_REJECT_REASONS = ['המחיר גבוה מדי עבורנו', 'התאריך לא מתאים', 'בחרנו ספק אחר', 'התפריט לא מתאים לנו', 'האירוע בוטל או נדחה'];

@@ -95,6 +95,7 @@ export class ApiService {
   acceptQuote(token: string, tier: string): Observable<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }> {
     return this.http.post<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }>(this.u(`/public/quotes/${token}/accept`), { tier });
   }
+  declineQuote(token: string, reason: string): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/decline`), { reason }); }
   updateGuestCount(token: string, guests: number): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/guest-count`), { guests }); }
   paymentInfo(token: string, id: string): Observable<{ amount: number; status: string; business_name: string; quote_number: string; tier: string }> {
     return this.http.get<{ amount: number; status: string; business_name: string; quote_number: string; tier: string }>(this.u(`/public/quotes/${token}/payments/${id}`));

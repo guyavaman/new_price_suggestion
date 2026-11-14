@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
-import { CONFIDENCE, EVENT_TYPE, KASHRUT, LINE_SOURCE, MEAL, QUOTE_STATUS, UNIT, dietLabel } from '../core/labels';
+import { CONFIDENCE, EVENT_TYPE, KASHRUT, LINE_SOURCE, MEAL, QUOTE_STATUS, REJECT_REASONS, UNIT, dietLabel } from '../core/labels';
 import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
 
 @Component({
@@ -24,10 +24,23 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
           @if (q.status === 'draft' || q.status === 'rejected' || q.status === 'expired') { <button class="btn ghost" (click)="setStatus('sent')">סמן כנשלחה</button> }
           @if (q.status !== 'approved') {
             <button class="btn" (click)="setStatus('approved')">הלקוח אישר את חבילת {{ tier()?.name }}</button>
-            @if (q.status !== 'rejected') { <button class="btn danger" (click)="setStatus('rejected')">הלקוח דחה</button> }
+            @if (q.status !== 'rejected') { <button class="btn danger" (click)="askReject.set(true)">הלקוח דחה</button> }
           }
         </div>
       </div>
+
+      @if (askReject()) {
+        <form class="card rejectbox" (ngSubmit)="reject()">
+          <b>למה הלקוח דחה?</b>
+          <div class="examples">@for (r of reasons; track r) { <button type="button" class="chip" [class.on]="rejectReason === r" (click)="rejectReason = r">{{ r }}</button> }</div>
+          <div class="row">
+            <input name="rr" [(ngModel)]="rejectReason" placeholder="או כתבו סיבה אחרת" aria-label="סיבת הדחייה">
+            <button class="btn danger" [disabled]="!rejectReason.trim()">סמן כנדחתה</button>
+            <button class="btn ghost" type="button" (click)="askReject.set(false)">ביטול</button>
+          </div>
+        </form>
+      }
+      @if (q.status === 'rejected' && rejectNote(); as why) { <div class="card rejected-why"><b>סיבת הדחייה:</b> {{ why }}</div> }
 
       @if (q.request.suspicious_instructions) {
         <div class="err">ההודעה כללה ניסיון לתת הוראות למערכת (למשל לשנות מחיר). ההוראה לא בוצעה.</div>
@@ -144,6 +157,10 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
     .budget.over { background: var(--warn-soft); color: var(--warn); }
     .warnbox { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: 8px; padding: 8px 12px; margin: 6px 0; }
     .cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; margin-top: 14px; align-items: start; }
+    .rejectbox { display: grid; gap: 10px; margin-top: 14px; border-color: var(--bad); }
+    .rejectbox .row { display: flex; gap: 8px; flex-wrap: wrap; } .rejectbox input { flex: 1; min-width: 200px; }
+    .chip.on { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
+    .rejected-why { margin-top: 14px; background: var(--bad-soft); color: var(--bad); }
     .cols.single { grid-template-columns: 1fr; }
     @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
     h2 { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
@@ -169,6 +186,8 @@ export class QuoteDetailComponent {
   lastEdit = signal<EditOut | null>(null);
   copied = signal(false);
   instruction = '';
+  askReject = signal(false); rejectReason = ''; reasons = REJECT_REASONS;
+  rejectNote = computed(() => [...(this.q()?.history ?? [])].reverse().find((h) => h.status === 'rejected')?.note ?? null);
   eventType = EVENT_TYPE; meal = MEAL; kashrut = KASHRUT; status = QUOTE_STATUS;
   unit = UNIT; src = LINE_SOURCE; conf = CONFIDENCE;
   editExamples = ['תחליף את השיפודים בסושי', 'תוריד ל-100 אורחים', 'תוסיף עמדת קפה ותה', 'תן ללקוח 15% הנחה'];
@@ -192,6 +211,12 @@ export class QuoteDetailComponent {
       error: () => this.error.set('ההצעה לא נמצאה או שהשרת לא זמין'),
     });
     this.api.deals().subscribe((ds) => this.dealId.set(ds.find((d) => d.quote_ids.includes(id))?.id ?? null));
+  }
+  reject() {
+    this.api.setQuoteStatus(this.id(), 'rejected', undefined, this.rejectReason.trim()).subscribe({
+      next: (r) => { this.askReject.set(false); this.rejectReason = ''; this.q.set(r.quote); this.load(); },
+      error: (e) => this.error.set(e.error?.detail ?? 'לא ניתן לעדכן סטטוס'),
+    });
   }
   setStatus(s: QuoteStatus) {
     this.api.setQuoteStatus(this.id(), s, s === 'approved' ? this.view() : undefined).subscribe({

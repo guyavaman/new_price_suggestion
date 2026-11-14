@@ -51,3 +51,5 @@ tr.link { cursor: pointer; } tr.link:hover td { background: var(--bg); }
 
 /* Latin references (Q-2026-1003, invoice numbers) inside Hebrew text: keep them LTR and apart */
 bdi.ref { unicode-bidi: isolate; direction: ltr; display: inline-block; margin: 0 .35em; font-variant-numeric: tabular-nums; }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 3px 11px; font: inherit; font-size: .85rem; cursor: pointer; color: inherit; }
+.chip:hover { border-color: var(--olive); }

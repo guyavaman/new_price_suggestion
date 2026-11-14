@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe, RelativePipe } from '../core/format';
-import { ACTOR, EVENT_TYPE, KASHRUT, MEAL, QUOTE_STATUS, SOURCE, STAGES, TEMP, dietLabel } from '../core/labels';
+import { ACTOR, EVENT_TYPE, KASHRUT, MEAL, QUOTE_STATUS, REJECT_REASONS, SOURCE, STAGES, TEMP, dietLabel } from '../core/labels';
 import { BusinessSettings, DealDetail, DealStage } from '../core/models';
 
 @Component({
@@ -33,7 +33,8 @@ import { BusinessSettings, DealDetail, DealStage } from '../core/models';
       @if (askLost()) {
         <form class="card lostbox" (ngSubmit)="confirmLost()">
           <label for="lr">למה האירוע לא יצא לפועל?</label>
-          <input id="lr" name="lr" [(ngModel)]="lostReason" placeholder="מחיר, תאריך, בחרו ספק אחר…">
+          <div class="reason-chips">@for (r of reasons; track r) { <button type="button" class="chip" (click)="lostReason = r">{{ r }}</button> }</div>
+          <input id="lr" name="lr" [(ngModel)]="lostReason" placeholder="או כתבו סיבה אחרת">
           <button class="btn danger" [disabled]="!lostReason.trim()">סמן כאבוד</button>
           <button class="btn ghost" type="button" (click)="askLost.set(false)">ביטול</button>
         </form>
@@ -157,6 +158,7 @@ import { BusinessSettings, DealDetail, DealStage } from '../core/models';
     .st.on { background: var(--st); border-color: var(--st); color: #fff; font-weight: 700; }
     .lostbox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
     .lostbox input { flex: 1; min-width: 200px; }
+    .reason-chips { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; }
     .layout { display: grid; grid-template-columns: 1fr 320px; gap: 14px; align-items: start; }
     @media (max-width: 1000px) { .layout { grid-template-columns: 1fr; } }
     h2 { margin-bottom: 10px; } h3 { font-size: 1rem; margin: 14px 0 6px; }
@@ -200,7 +202,7 @@ export class DealDetailComponent {
   askLost = signal(false);
   stages = STAGES; meal = MEAL; kashrut = KASHRUT; eventType = EVENT_TYPE; source = SOURCE; actor = ACTOR;
   temp = TEMP; qStatus = QUOTE_STATUS;
-  note = ''; noteKind = 'note'; task = ''; invoiceNumber = ''; lostReason = '';
+  note = ''; noteKind = 'note'; task = ''; invoiceNumber = ''; lostReason = ''; reasons = REJECT_REASONS;
   quote = computed(() => { const q = this.x()?.quotes ?? []; return q[q.length - 1] ?? null; });
 
   constructor() {
