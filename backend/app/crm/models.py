@@ -184,7 +184,7 @@ class ChatMessage(BaseModel):
     text: str
     at: datetime = Field(default_factory=now)
     tools: list[dict] = Field(default_factory=list, description="Tool calls made for this reply")
-    by: str = Field("ai", description="Assistant messages: 'ai', 'human' or 'system' (auto)")
+    by: str = Field("ai", description="'customer' (user); assistant: 'ai', 'human', 'system'")
 
 
 class ConversationStatus(StrEnum):

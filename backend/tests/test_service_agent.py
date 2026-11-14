@@ -119,3 +119,11 @@ def test_service_chat_api(api, env):
     # model down (e.g. no API key) -> clean 503, the page keeps working
     assert client.post(f"/public/quotes/{q.public_token}/chat",
                        json={"message": "עוד"}).status_code == 503
+
+
+
+def test_replies_are_plain_text():
+    from app.agent.sales import plain_text
+    raw = "נשארה יתרה של **12,047 ₪**\n## סיכום\nתודה"
+    assert plain_text(raw) == "נשארה יתרה של 12,047 ₪\nסיכום\nתודה"
+    assert plain_text("2*3 = 6") == "2*3 = 6"
