@@ -120,14 +120,24 @@ def seed(reset: bool = False) -> None:
             crm.move_stage(TENANT, d.id, DealStage(stage), Actor.agent if src == "web_chat"
                            else Actor.user, "המחיר גבוה מהתקציב" if stage == "lost" else None)
         if src == "web_chat":
+            if i == 0:
+                script = CHAT
+            elif ready:  # a handoff only ever follows a reason: here, a customer ready to book
+                script = [("user", f"שלום, צריך הצעה ל-{guests} איש"),
+                          ("assistant", "בשמחה! שלחתי הצעה עם שלוש חבילות לבחירה 🙂"),
+                          ("user", "נראה מצוין, אנחנו רוצים לסגור. אפשר שמישהו יחזור אליי?"),
+                          ("assistant", "מעולה! 🎉 העברתי לצוות, נציג יחזור אלייך היום כדי "
+                                        "לסגור את כל הפרטים.")]
+            else:
+                script = [("user", f"שלום, צריך הצעה ל-{guests} איש"),
+                          ("assistant", "בשמחה! באיזה תאריך מדובר?")]
             conv = Conversation(tenant_id=TENANT, customer_id=c.id, deal_id=d.id,
                                 status=ConversationStatus.handed_off if ready
                                 else ConversationStatus.active,
-                                messages=[ChatMessage(role=ChatRole(r), text=t) for r, t in CHAT]
-                                if i == 0 else [ChatMessage(role=ChatRole.user,
-                                                            text=f"שלום, צריך הצעה ל-{guests} איש"),
-                                                ChatMessage(role=ChatRole.assistant,
-                                                            text="בשמחה! באיזה תאריך מדובר?")])
+                                handoff_reason="הלקוח מוכן להזמין" if ready else None,
+                                messages=[ChatMessage(role=ChatRole(r), text=t,
+                                                      by="customer" if r == "user" else "ai")
+                                          for r, t in script])
             conv = crm.conversations.put(conv)
             d = crm.deals.get(TENANT, d.id)  # reload: move_stage saved a newer copy
             d.conversation_id = conv.id
