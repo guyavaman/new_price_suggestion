@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.agent.sales import SalesAgent
 from app.crm.models import ConversationStatus
 from app.deps import get_public_tenant, get_sales_agent
 from app.integrations.config import TenantConfig
+from app.security import limit_chat
 
 router = APIRouter(prefix="/agent", tags=["sales agent"])
 
@@ -27,8 +28,9 @@ class ChatOut(BaseModel):
 
 
 @router.post("/chat", response_model=ChatOut)
-def chat(body: ChatIn, t: TenantConfig = Depends(get_public_tenant),
+def chat(body: ChatIn, request: Request, t: TenantConfig = Depends(get_public_tenant),
          agent: SalesAgent = Depends(get_sales_agent)) -> ChatOut:
+    limit_chat(request)
     try:
         r = agent.chat(t.tenant_id, body.message, body.conversation_id)
     except ValueError as e:

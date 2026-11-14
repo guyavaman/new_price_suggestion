@@ -47,6 +47,9 @@ from app.services.pricing import PricingEngine
 from app.services.quotes import create_quote, standard_plan, tiers_for
 
 HISTORY_LIMIT = 24
+MAX_CUSTOMER_MESSAGES = 40  # a longer chat is a human's job (or a bot): stop calling the model
+LONG_CHAT_REPLY = ("השיחה ארוכה ואני רוצה לוודא שלא נפספס כלום 🙂 נציג יחזור אליך בהקדם. "
+                   "אפשר גם להתקשר אלינו.")
 _MD = re.compile(r"\*\*(.+?)\*\*|__(.+?)__", re.S)
 
 
@@ -145,6 +148,12 @@ class SalesAgent:
         if conv.deal_id:
             self.crm.log(tenant, ActivityKind.chat, f"הלקוח: {text}", Actor.customer,
                          deal_id=conv.deal_id, meta={"frustrated": frustrated})
+
+        if sum(m.role == ChatRole.user for m in conv.messages) > MAX_CUSTOMER_MESSAGES:
+            last = next((m for m in reversed(conv.messages[:-1]) if m.role == ChatRole.assistant),
+                        None)
+            reply = "" if last and last.text == LONG_CHAT_REPLY else LONG_CHAT_REPLY
+            return self._finish(tenant, conv, reply, [], by="system")
 
         if conv.status == ConversationStatus.human:
             # A salesperson is in the conversation: the AI stays out of it. Escalate if the

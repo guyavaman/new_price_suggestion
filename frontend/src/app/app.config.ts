@@ -3,12 +3,13 @@ import { provideHttpClient, withInterceptors } from '@angular/common/http';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 import { routes } from './app.routes';
 import { tenantInterceptor } from './core/api.service';
+import { authInterceptor } from './core/auth';
 
 export const appConfig: ApplicationConfig = {
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
     provideRouter(routes, withComponentInputBinding()),
-    provideHttpClient(withInterceptors([tenantInterceptor])),
+    provideHttpClient(withInterceptors([tenantInterceptor, authInterceptor])),
     { provide: LOCALE_ID, useValue: 'en-US' },
   ],
 };

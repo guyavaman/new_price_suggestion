@@ -14,6 +14,7 @@ from anthropic import Anthropic
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.security import ai_budget
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -49,7 +50,13 @@ class LLMClient:
         settings = get_settings()
         self.model = model or settings.llm_model
         self.max_tokens = settings.llm_max_tokens
+        self._metered = client is None  # real API calls count against the daily AI budget
         self._client = client or Anthropic(api_key=settings.anthropic_api_key or None)
+
+    def _create(self, **kw):
+        if self._metered:
+            ai_budget.spend()
+        return self._client.messages.create(**kw)
 
     def structured(
         self,
@@ -66,7 +73,7 @@ class LLMClient:
             "input_schema": schema.model_json_schema(),
         }
         start = time.perf_counter()
-        response = self._client.messages.create(
+        response = self._create(
             model=self.model,
             max_tokens=self.max_tokens,
             system=system,
@@ -121,7 +128,7 @@ class LLMClient:
         start = time.perf_counter()
 
         for _ in range(max_steps):
-            response = self._client.messages.create(
+            response = self._create(
                 model=self.model, max_tokens=self.max_tokens, system=system,
                 tools=api_tools, messages=messages,
             )

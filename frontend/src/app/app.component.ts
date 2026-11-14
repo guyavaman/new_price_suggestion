@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { ActivatedRoute, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
+import { AuthService } from './core/auth';
 
 @Component({
   selector: 'app-root',
@@ -15,8 +16,11 @@ import { filter } from 'rxjs';
           @for (l of main; track l.path) { <a [routerLink]="l.path" routerLinkActive="on">{{ l.label }}</a> }
           <span class="sep"></span>
           @for (l of more; track l.path) { <a class="minor" [routerLink]="l.path" routerLinkActive="on">{{ l.label }}</a> }
+          @if (auth.role() === 'viewer') { <span class="viewer" title="דמו ציבורי: אפשר להסתכל, אי אפשר לשנות">צפייה בלבד</span> }
+          @if (auth.role()) { <button type="button" class="out" (click)="auth.logout()">יציאה</button> }
         </nav>
       </header>
+      @if (auth.notice()) { <div class="notice" role="status">{{ auth.notice() }}</div> }
     }
     <main [class.main]="!isPublic()"><router-outlet /></main>
   `,
@@ -29,6 +33,9 @@ import { filter } from 'rxjs';
     a { color: inherit; text-decoration: none; padding: 7px 11px; border-radius: 8px; opacity: .85; white-space: nowrap; }
     a:hover { background: rgba(255,255,255,.08); opacity: 1; }
     a.on { background: rgba(255,255,255,.16); opacity: 1; font-weight: 700; }
+    .viewer { font-size: .75rem; background: var(--honey-soft); color: #8a5c06; border-radius: 99px; padding: 2px 10px; margin-inline-start: 6px; }
+    .out { background: none; border: 0; color: inherit; opacity: .65; cursor: pointer; font: inherit; font-size: .85rem; padding: 7px 8px; }
+    .notice { position: sticky; top: 58px; z-index: 19; background: var(--honey-soft); color: #6b4705; text-align: center; padding: 8px; font-size: .9rem; }
     .sep { flex: 1; } .minor { font-size: .85rem; opacity: .65; }
     .burger { display: none; margin-inline-start: auto; background: none; border: 1px solid rgba(255,255,255,.35); color: inherit; border-radius: 8px; padding: 4px 10px; font-size: 1.1rem; }
     .main { display: block; padding: 24px clamp(16px, 3vw, 36px) 48px; max-width: 1440px; margin: 0 auto; }
@@ -42,6 +49,7 @@ import { filter } from 'rxjs';
 })
 export class AppComponent {
   private router = inject(Router);
+  auth = inject(AuthService);
   private route = inject(ActivatedRoute);
   open = signal(false);
   isPublic = signal(false);

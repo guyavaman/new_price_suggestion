@@ -11,3 +11,7 @@ services:
         value: "1"
       - key: ANTHROPIC_API_KEY
         sync: false   # paste your key in Render to enable the AI agent and quotes from messages
+      - key: OWNER_PASSWORD
+        sync: false   # owner login; visitors can still enter a read-only demo
+      - key: AI_DAILY_CALLS
+        value: "200"

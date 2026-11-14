@@ -42,6 +42,6 @@ testem.log
 Thumbs.db
 
 # Playwright
-e2e/.store/
+e2e/.store*/
 test-results/
 playwright-report/

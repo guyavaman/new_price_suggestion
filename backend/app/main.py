@@ -2,11 +2,12 @@ import os
 from datetime import date
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from app import security
 from app.api import agent as agent_api
 from app.api import business as business_api
 from app.api import crm as crm_api
@@ -55,6 +56,55 @@ app.include_router(public_api.router)
 app.include_router(business_api.router)
 
 __all__ = ["get_crm", "get_public_tenant", "get_sales_agent", "get_tenant_loader"]
+
+@app.middleware("http")
+async def owner_auth(request: Request, call_next):
+    """With OWNER_PASSWORD set: owner routes need a login token; viewers may only read."""
+    if not security.auth_required() or request.method == "OPTIONS":
+        return await call_next(request)
+    if security.is_public(request.method, request.url.path):
+        return await call_next(request)
+    auth = request.headers.get("authorization", "")
+    role = security.verify_token(auth[7:] if auth.lower().startswith("bearer ") else None)
+    if role is None:
+        return JSONResponse({"detail": "נדרשת התחברות", "code": "login"}, status_code=401)
+    if role == "viewer" and request.method not in security.READ_METHODS:
+        return JSONResponse({"detail": "מצב צפייה: בדמו הציבורי אי אפשר לשנות נתונים",
+                             "code": "viewer"}, status_code=403)
+    return await call_next(request)
+
+
+@app.exception_handler(security.RateLimited)
+async def _rate_limited(request: Request, e: security.RateLimited):
+    return JSONResponse({"detail": "יותר מדי הודעות, נסו שוב בעוד דקה"}, status_code=429,
+                        headers={"Retry-After": str(e.retry_after)})
+
+
+@app.exception_handler(security.AiBudgetExceeded)
+async def _ai_budget(request: Request, e: security.AiBudgetExceeded):
+    return JSONResponse({"detail": "ה-AI לא זמין כרגע (הגענו למכסה היומית). אפשר להתקשר אלינו."},
+                        status_code=503)
+
+
+class LoginBody(BaseModel):
+    password: str | None = Field(None, max_length=200)
+    guest: bool = False
+
+
+@app.get("/auth/status", tags=["auth"])
+def auth_status() -> dict:
+    return {"required": security.auth_required(), "guest": security.guest_allowed()}
+
+
+@app.post("/auth/login", tags=["auth"])
+def login(body: LoginBody, request: Request) -> dict:
+    security.limit_login(request)
+    if body.guest and security.guest_allowed():
+        return {"token": security.make_token("viewer"), "role": "viewer"}
+    if body.password and security.check_password(body.password):
+        return {"token": security.make_token("owner"), "role": "owner"}
+    raise HTTPException(status_code=401, detail="סיסמה שגויה")
+
 
 app.add_middleware(
     CORSMiddleware,

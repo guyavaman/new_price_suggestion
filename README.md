@@ -169,6 +169,18 @@ python evals/run_agent.py --judge              # + LLM-as-judge conversation qua
 python evals/run_agent.py --only discount-request,prompt-injection
 ```
 
+## Running it in public: login, limits, AI budget
+
+| Setting (env var) | What it does |
+|---|---|
+| `OWNER_PASSWORD` | Owner screens and API need a login. Customer pages (`/q/…`), the website chat and `/health` stay open: the quote link token is the customer's key. Not set = open (local dev). |
+| `GUEST_VIEWER` (default `1`) | Adds "כניסה לדמו (צפייה בלבד)" for portfolio visitors: every screen readable, every write refused (so no data changes and no AI spend through owner screens). Set `0` for a real business. |
+| `AI_DAILY_CALLS` (default `200`) | Cap on model calls per day across the system. Over it, AI features answer "not available now"; everything else keeps working. |
+| `CHAT_PER_MINUTE` (default `12`) | Chat messages per minute per IP (website chat and customer-page chat). Login attempts: 5/min per IP. |
+
+Long chats stop calling the model after 40 customer messages (a person takes over). Login tokens
+are HMAC-signed, expire after 7 days, and changing the password logs everyone out.
+
 ## Browser tests (Playwright)
 
 `frontend/e2e/` covers the paths a customer or the owner actually walks, in Chromium against
@@ -179,9 +191,11 @@ the real API serving the production build, on a throwaway copy of the seeded dem
 - final guest count from the customer page, re-priced
 - rejection with a reason, by the owner and by the customer
 - the service chat on the quote page (model mocked), and the "chat unavailable" fallback
+- with a password set (second test server): login, logout, the read-only demo viewer, and
+  customer pages that stay open
 
 ```bash
-cd frontend && npx ng build && npx playwright test     # ~20s, 17 tests
+cd frontend && npx ng build && npx playwright test     # ~25s, 21 tests
 ```
 
 CI runs them on every push and keeps the trace of any failure.

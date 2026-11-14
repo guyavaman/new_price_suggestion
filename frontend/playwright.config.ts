@@ -9,6 +9,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const PORT = 8123;
 const STORE = 'e2e/.store';
+export const AUTH_PORT = 8124;
+export const AUTH_PASSWORD = 'e2e-owner-pass';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -23,11 +25,22 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: `rm -rf ${STORE} && cd ../backend && STORE_DIR=../frontend/${STORE} SEED_DEMO=1 PUBLIC_BASE_URL=http://localhost:${PORT} ` +
-      `FRONTEND_DIST=../frontend/dist/crm/browser python3 -m uvicorn app.main:app --port ${PORT}`,
-    url: `http://localhost:${PORT}/health`,
-    reuseExistingServer: false,
-    timeout: 60_000,
-  },
+  webServer: [
+    {
+      command: `rm -rf ${STORE} && cd ../backend && STORE_DIR=../frontend/${STORE} SEED_DEMO=1 PUBLIC_BASE_URL=http://localhost:${PORT} ` +
+        `FRONTEND_DIST=../frontend/dist/crm/browser python3 -m uvicorn app.main:app --port ${PORT}`,
+      url: `http://localhost:${PORT}/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      // same app with a password set: login, read-only demo viewer (auth.spec.ts)
+      command: `rm -rf ${STORE}-auth && cd ../backend && STORE_DIR=../frontend/${STORE}-auth SEED_DEMO=1 ` +
+        `OWNER_PASSWORD=${AUTH_PASSWORD} FRONTEND_DIST=../frontend/dist/crm/browser ` +
+        `python3 -m uvicorn app.main:app --port ${AUTH_PORT}`,
+      url: `http://localhost:${AUTH_PORT}/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+  ],
 });

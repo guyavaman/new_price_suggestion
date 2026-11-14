@@ -3,6 +3,7 @@ import pytest
 from app.catalog.loader import load_catalog
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import MenuLine, MenuPlan
+from app.security import limiter
 from app.services.pricing import PricingEngine
 
 
@@ -64,3 +65,9 @@ def env(tmp_path):
             "sync": sync, "tenant": tenant, "portal": portal, "tmp": tmp_path}
 
 
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits():
+    limiter.reset()
+    yield

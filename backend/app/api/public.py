@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.agent.service import ServiceContext
 from app.crm.models import ConversationStatus
 from app.deps import get_agent_builder, get_crm, get_portal, get_repo
+from app.security import AiBudgetExceeded, limit_chat
 from app.services.portal import CustomerPortal, PortalError, PublicQuote
 
 router = APIRouter(prefix="/public", tags=["customer page"])
@@ -103,9 +104,10 @@ def service_history(token: str, repo=Depends(get_repo), crm=Depends(get_crm)):
 
 
 @router.post("/quotes/{token}/chat", response_model=ServiceChatOut)
-def service_chat(token: str, body: ServiceChatIn, repo=Depends(get_repo),
+def service_chat(token: str, body: ServiceChatIn, request: Request, repo=Depends(get_repo),
                  portal: CustomerPortal = Depends(get_portal), build=Depends(get_agent_builder)):
     """The link token identifies the customer: the agent answers about this booking only."""
+    limit_chat(request)
     q = repo.find_by_token(token)
     if q is None:
         raise HTTPException(404, "הקישור לא תקין")
@@ -114,6 +116,8 @@ def service_chat(token: str, body: ServiceChatIn, repo=Depends(get_repo),
                                     service=ServiceContext(quote=q, portal=portal))
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    except AiBudgetExceeded:
+        raise
     except Exception as e:  # model unavailable / no API key: the page keeps working without chat
         raise HTTPException(503, "הצ'אט לא זמין כרגע. אפשר להתקשר אלינו.") from e
     return ServiceChatOut(status=r.conversation.status, messages=_visible(r.conversation),

@@ -1,6 +1,8 @@
 import { Routes } from '@angular/router';
+import { ownerGuard } from './core/auth';
 
-const page = (title: string, load: () => Promise<any>, data: Record<string, unknown> = {}) => ({ title, loadComponent: load, data });
+const page = (title: string, load: () => Promise<any>, data: Record<string, unknown> = {}) =>
+  ({ title, loadComponent: load, data, canActivate: data['public'] ? [] : [ownerGuard] });
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'today' },
@@ -19,6 +21,7 @@ export const routes: Routes = [
   { path: 'quotes', ...page('הצעות מחיר', () => import('./pages/quotes-list.component').then((m) => m.QuotesListComponent)) },
   { path: 'chat', ...page("צ'אט לקוח", () => import('./pages/chat-widget.component').then((m) => m.ChatWidgetComponent)) },
   // customer-facing, no navigation bar
+  { path: 'login', ...page('כניסה', () => import('./pages/login.component').then((m) => m.LoginComponent), { public: true }) },
   { path: 'q/:token', ...page('הצעת מחיר', () => import('./pages/customer-quote.component').then((m) => m.CustomerQuoteComponent), { public: true }) },
   { path: 'pay/:id', ...page('תשלום', () => import('./pages/pay.component').then((m) => m.PayComponent), { public: true }) },
   // old links
