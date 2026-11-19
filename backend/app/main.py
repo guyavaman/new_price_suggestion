@@ -12,6 +12,9 @@ from app.api import agent as agent_api
 from app.api import business as business_api
 from app.api import crm as crm_api
 from app.api import public as public_api
+from app.business.settings import SettingsService
+from app.crm.models import ActivityKind, Actor
+from app.crm.service import CrmService
 from app.deps import (
     get_catalog,
     get_corrections,
@@ -23,6 +26,7 @@ from app.deps import (
     get_public_tenant,
     get_repo,
     get_sales_agent,
+    get_settings_service,
     get_sync,
     get_tenant,
     get_tenant_loader,
@@ -36,6 +40,7 @@ from app.schemas.catalog import CatalogItem
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import QuoteStatus, TierQuote
 from app.services.corrections import Correction, CorrectionStore, Review
+from app.services.costing import CostSummary, missing_parts, profit_check, summarize
 from app.services.editing import EditService
 from app.services.extraction import ExtractionService
 from app.services.menu import MenuPlanner
@@ -151,6 +156,35 @@ class StatusBody(BaseModel):
     status: QuoteStatus
     tier: str | None = Field(None, description="basic | recommended | premium")
     note: str | None = None
+    override_floor: bool = Field(False, description="Owner sends despite profit floor / "
+                                                    "missing cost (logged)")
+
+
+class TierProfit(BaseModel):
+    key: str
+    name: str
+    summary: CostSummary
+    missing_detail: list[str] = Field(default_factory=list)  # what exactly has no cost
+
+
+class QuoteProfit(BaseModel):
+    floor: float
+    tiers: list[TierProfit]
+    send_blockers: list[str]  # why sending needs the owner's explicit approval
+
+
+def quote_profit(q: StoredQuote, catalog: list[CatalogItem], floor: float) -> QuoteProfit:
+    by_sku = {i.sku: i for i in catalog}
+    tiers, blockers = [], []
+    for t in q.tiers:
+        s = summarize(t.quote, floor)
+        detail = sorted({p for m in s.missing if m["sku"] in by_sku
+                         for p in (missing_parts(by_sku[m["sku"]], by_sku) or [m["name"]])})
+        tiers.append(TierProfit(key=t.key, name=t.name, summary=s, missing_detail=detail))
+        ok, why = profit_check(t.quote, floor)
+        if not ok:
+            blockers.append(f"{t.name}: {why}")
+    return QuoteProfit(floor=floor, tiers=tiers, send_blockers=blockers)
 
 
 ALLOWED_TRANSITIONS = {
@@ -221,6 +255,15 @@ def get_quote(quote_id: str, tenant: TenantConfig = Depends(get_tenant), repo=De
     return _get_quote(repo, tenant, quote_id)
 
 
+@app.get("/quotes/{quote_id}/profit", response_model=QuoteProfit, tags=["profit"])
+def get_quote_profit(quote_id: str, tenant: TenantConfig = Depends(get_tenant),
+                     repo=Depends(get_repo), catalog: list[CatalogItem] = Depends(get_catalog),
+                     settings: SettingsService = Depends(get_settings_service)) -> QuoteProfit:
+    """Owner-only: cost, gross profit and breakdown per tier, against the profit floor."""
+    q = _get_quote(repo, tenant, quote_id)
+    return quote_profit(q, catalog, settings.get(tenant.tenant_id).profit_floor)
+
+
 @app.post("/quotes/{quote_id}/edit", response_model=EditOut)
 def edit_quote(quote_id: str, body: EditBody, tenant: TenantConfig = Depends(get_tenant),
                editor: EditService = Depends(get_edit_service),
@@ -241,11 +284,29 @@ def edit_quote(quote_id: str, body: EditBody, tenant: TenantConfig = Depends(get
 
 @app.post("/quotes/{quote_id}/status", response_model=QuoteOut)
 def set_status(quote_id: str, body: StatusBody, tenant: TenantConfig = Depends(get_tenant),
-               repo=Depends(get_repo), sync: SyncService = Depends(get_sync)) -> QuoteOut:
+               repo=Depends(get_repo), sync: SyncService = Depends(get_sync),
+               catalog: list[CatalogItem] = Depends(get_catalog),
+               settings: SettingsService = Depends(get_settings_service),
+               crm: CrmService = Depends(get_crm)) -> QuoteOut:
     q = _get_quote(repo, tenant, quote_id)
     if body.status not in ALLOWED_TRANSITIONS[q.status]:
         raise HTTPException(status_code=409,
                             detail=f"Cannot move from {q.status.value} to {body.status.value}")
+    if body.status == QuoteStatus.sent:
+        blockers = quote_profit(q, catalog,
+                                settings.get(tenant.tenant_id).profit_floor).send_blockers
+        if blockers and not body.override_floor:
+            raise HTTPException(status_code=409, detail={
+                "code": "profit_floor", "message": "ההצעה דורשת אישור מפורש לפני שליחה",
+                "blockers": blockers})
+        if blockers:  # sent anyway, by the owner: keep the decision on record
+            note = "נשלח באישור בעל העסק למרות: " + "; ".join(blockers)
+            body.note = f"{body.note} · {note}" if body.note else note
+            deal = next(iter(crm.deals.list(tenant.tenant_id,
+                                            lambda d: q.id in d.quote_ids)), None)
+            if deal:
+                crm.log(tenant.tenant_id, ActivityKind.note, note, Actor.user, deal_id=deal.id,
+                        meta={"quote_id": q.id, "override_floor": True})
     if body.tier:
         q.tier(body.tier)  # validates
         q.selected_tier = body.tier

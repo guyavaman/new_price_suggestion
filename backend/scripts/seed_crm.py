@@ -105,7 +105,7 @@ def seed(reset: bool = False) -> None:
                                    contact=ContactInfo(name=c.name, phone=c.phone,
                                                        company=c.company),
                                    service={"waiters": guests >= 60})
-            q = create_quote(repo, TENANT, req, standard_plan(req), catalog, engine,
+            q = create_quote(repo, TENANT, req, standard_plan(req, catalog), catalog, engine,
                              f"פנייה של {c.name or c.company} ל{guests} אורחים")
             q.status = QUOTE_STATUS_FOR_STAGE[stage]
             q.history.append(StatusChange(status=q.status))

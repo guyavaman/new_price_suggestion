@@ -31,6 +31,11 @@ class BusinessSettings(BaseModel):
     # pricing
     vat_rate: float = Field(0.18, ge=0, le=0.5)
     timezone: str = Field("Asia/Jerusalem", description="Day/month boundaries of every KPI")
+    # profit (owner-only)
+    profit_floor: float = Field(0.30, ge=0, le=0.95,
+                                description="Minimum gross margin; below it the owner must approve")
+    cost_alert_threshold: float = Field(0.05, ge=0, le=1,
+                                        description="Cost increase that triggers the impact alert")
     waiter_ratio: int = Field(15, ge=1, description="one waiter per N guests")
     bartender_ratio: int = Field(75, ge=1)
     head_waiter_from: int = Field(80, ge=1)

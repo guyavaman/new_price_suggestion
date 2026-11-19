@@ -239,8 +239,10 @@ def test_public_and_owner_api(env):
         assert c.get(f"/crm/deals/{d.id}", headers=h).json()["deal"]["stage"] == "won"
 
         assert c.patch("/catalog/PKG-MEAT-STD", headers=h, json={"price": -1}).status_code == 422
-        item = c.patch("/catalog/PKG-MEAT-STD", headers=h, json={"price": 205}).json()
+        item = c.patch("/catalog/PKG-MEAT-STD", headers=h, json={"price": 205}).json()["item"]
         assert item["price"] == 205
+        # a package's cost comes from its components, never typed in
+        assert c.patch("/catalog/PKG-MEAT-STD", headers=h, json={"cost": 50}).status_code == 422
         st = c.patch("/settings", headers=h, json={"deposit_rate": 0.5}).json()
         assert st["deposit_rate"] == 0.5
         assert c.patch("/settings", headers=h, json={"deposit_rate": 3}).status_code == 422
@@ -319,5 +321,60 @@ def test_message_sent_is_logged(env):
         assert "quote" in d["sent_messages"]
         assert any("שליחת ההצעה" in a.text for a in env["crm"].timeline(T, deal.id))
         assert c.post(f"/crm/deals/{deal.id}/messages/nope/sent", headers=h).status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+# ---------- stage 1: cost changes, send guard ----------
+
+def _api(env):
+    from app import deps
+    app.dependency_overrides.update({
+        deps.get_crm: lambda: env["crm"], deps.get_repo: lambda: env["repo"],
+        deps.get_settings_service: lambda: env["settings"],
+        deps.get_catalog_service: lambda: env["catalog"],
+        deps.get_tenant_loader: lambda: (lambda tid: env["tenant"]),
+    })
+    return TestClient(app), {"X-Tenant-ID": T}
+
+
+def test_cost_increase_lists_affected_quotes_and_opens_a_task(env):
+    q, deal = make_quote(env)  # meat package, sent
+    c, h = _api(env)
+    try:
+        pkg = next(ln for ln in q.tier().quote.lines if ln.sku.startswith("PKG-"))
+        comp = env["catalog"].get(T, pkg.sku).components[0].sku  # an ingredient of the package
+        old = env["catalog"].get(T, comp).cost
+        r = c.patch(f"/catalog/{comp}", headers=h, json={"cost": round(old * 1.5, 2)}).json()
+        assert r["item"]["cost_source"] == "manual" and r["item"]["cost_updated_at"]
+        row = next(x for x in r["cost_impact"] if x["quote_id"] == q.id)
+        assert row["kind"] == "open_quote" and row["delta"] < 0
+        assert row["profit_after"] < row["profit_before"]
+        assert any("עלתה" in t.title for t in env["crm"].tasks.list(T))
+        # small changes and decreases don't alarm
+        r2 = c.patch(f"/catalog/{comp}", headers=h, json={"cost": round(old * 1.5 * 1.01, 2)})
+        assert r2.json()["cost_impact"] == []
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_sending_below_floor_needs_explicit_owner_approval(env):
+    q, deal = make_quote(env)
+    from app.schemas.quote import QuoteStatus
+    q.status = QuoteStatus.draft
+    env["repo"].save(q)
+    c, h = _api(env)
+    try:
+        env["settings"].update(T, {"profit_floor": 0.9})  # nothing clears a 90% floor
+        prof = c.get(f"/quotes/{q.id}/profit", headers=h).json()
+        assert prof["send_blockers"] and prof["tiers"][1]["summary"]["below_floor"] is True
+        r = c.post(f"/quotes/{q.id}/status", headers=h, json={"status": "sent"})
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "profit_floor"
+        ok = c.post(f"/quotes/{q.id}/status", headers=h,
+                    json={"status": "sent", "override_floor": True})
+        assert ok.status_code == 200
+        assert "באישור בעל העסק" in ok.json()["quote"]["history"][-1]["note"]
+        assert any(a.meta.get("override_floor") for a in env["crm"].timeline(T, deal.id))
     finally:
         app.dependency_overrides.clear()

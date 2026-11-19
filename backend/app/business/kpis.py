@@ -116,3 +116,110 @@ def compute(crm, tenant: str, rules, today: date | None = None) -> Kpis:
                          if convs else None),
         sources=dict(Counter(d.source.value for d in deals)),
     )
+
+
+# ---------------------------------------------------------------- profit (owner-only)
+
+class ProfitRow(BaseModel):
+    key: str
+    label: str
+    events: int
+    revenue: float  # before VAT, all booked events in the group
+    profit: float | None  # gross profit of the events whose cost is complete
+    margin: float | None  # profit / revenue of those same events
+    missing_cost: int  # events left out of profit because a cost is unknown
+
+
+class EventProfit(BaseModel):
+    deal_id: str
+    title: str
+    event_date: date | None
+    event_type: str | None
+    package: str | None
+    revenue: float
+    cost: float | None
+    profit: float | None
+    margin: float | None
+    missing: list[str]
+
+
+class ProfitReport(BaseModel):
+    floor: float
+    by_month: list[ProfitRow]
+    by_event_type: list[ProfitRow]
+    by_package: list[ProfitRow]
+    events: list[EventProfit]
+
+
+def _event_profit(d: Deal, q, vat: float, by_sku: dict) -> EventProfit:
+    from app.services.costing import missing_parts, summarize  # late import
+    s = summarize(q.tier().quote) if q else None
+    pkg = None
+    if q:
+        pkg = next((ln.name_he for ln in q.tier().quote.lines
+                    if ln.sku in by_sku and by_sku[ln.sku].category.value == "package"), None)
+    rev = net_value(d, vat)
+    return EventProfit(
+        deal_id=d.id, title=d.title, event_date=d.event_date, event_type=d.event_type,
+        package=pkg, revenue=rev, cost=s.total_cost if s else None,
+        profit=s.gross_profit if s else None, margin=s.margin if s else None,
+        missing=sorted({p for m in s.missing
+                        for p in (missing_parts(by_sku[m["sku"]], by_sku)
+                                  if m["sku"] in by_sku else [m["name"]]) or [m["name"]]})
+        if s else ["אין הצעת מחיר"])
+
+
+def _rows(events: list[EventProfit], key, label) -> list[ProfitRow]:
+    groups: dict[str, list[EventProfit]] = {}
+    for e in events:
+        groups.setdefault(key(e), []).append(e)
+    out = []
+    for k, es in groups.items():
+        known = [e for e in es if e.profit is not None]
+        rev_known = sum(e.revenue for e in known)
+        profit = round(sum(e.profit for e in known), 2) if known else None
+        out.append(ProfitRow(key=k, label=label(k), events=len(es),
+                             revenue=round(sum(e.revenue for e in es), 2), profit=profit,
+                             margin=round(profit / rev_known, 4) if known and rev_known else None,
+                             missing_cost=len(es) - len(known)))
+    return out
+
+
+EVENT_TYPE_HE = {"wedding": "חתונה", "bar_bat_mitzvah": "בר/בת מצווה", "brit": "ברית",
+                 "birthday": "יום הולדת", "corporate": "אירוע חברה", "conference": "כנס",
+                 "holiday": "חג", "private": "אירוע פרטי", "other": "אחר"}
+
+
+def profit_report(crm, repo, catalog, tenant: str, rules, today: date | None = None,
+                  months: int = 6) -> ProfitReport:
+    """Revenue and gross profit of booked events (by booking month, event type, package)."""
+    tz = tz_of(rules)
+    today = today or datetime.now(tz).date()
+    by_sku = {i.sku: i for i in catalog}
+    quotes = {q.id: q for q in repo.list(tenant)}
+    deals = [d for d in crm.deals.list(tenant) if is_booked(d) and d.won_at]
+    events = []
+    for d in deals:
+        q = next((quotes[qid] for qid in reversed(d.quote_ids) if qid in quotes), None)
+        e = _event_profit(d, q, rules.vat_rate, by_sku)
+        e_month = d.won_at.astimezone(tz).strftime("%Y-%m")
+        events.append((e_month, e))
+    first = today.replace(day=1)
+    keys = []
+    for _ in range(months):
+        keys.append(first.strftime("%Y-%m"))
+        first = (first - timedelta(days=1)).replace(day=1)
+    month_of = {id(e): m for m, e in events}
+    in_range = [e for m, e in events if m in keys]
+    by_month = {r.key: r for r in _rows(in_range, lambda e: month_of[id(e)], lambda k: k)}
+    return ProfitReport(
+        floor=rules.profit_floor,
+        by_month=[by_month.get(k) or ProfitRow(key=k, label=k, events=0, revenue=0, profit=None,
+                                                 margin=None, missing_cost=0)
+                  for k in reversed(keys)],
+        by_event_type=sorted(_rows(in_range, lambda e: e.event_type or "other",
+                                   lambda k: EVENT_TYPE_HE.get(k, k)), key=lambda r: -r.revenue),
+        by_package=sorted(_rows(in_range, lambda e: e.package or "ללא חבילה", lambda k: k),
+                          key=lambda r: -r.revenue),
+        events=sorted(in_range, key=lambda e: e.event_date or today, reverse=True),
+    )

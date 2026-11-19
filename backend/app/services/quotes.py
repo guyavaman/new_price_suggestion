@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from app.repositories.quotes import StatusChange, StoredQuote
-from app.schemas.catalog import CatalogItem
-from app.schemas.extraction import ExtractedRequest
+from app.schemas.catalog import CatalogItem, DefaultUse
+from app.schemas.extraction import ExtractedRequest, MealType
 from app.schemas.quote import MenuLine, MenuPlan, QuoteStatus, TierQuote
-from app.services.pricing import PricingEngine
+from app.services.pricing import ALLOWED_MEAL, PricingEngine
 from app.services.tiers import build_tiers
 
 # Fallback menu when no LLM planner is available (and for instant estimates).
-STANDARD_PACKAGE = {"meat": "PKG-MEAT-STD", "dairy": "PKG-DAIRY-STD", "pareve": "PKG-VEGAN"}
-RECEPTION = {"meat": "CAN-SKEWER-CHICK", "dairy": "CAN-MINI-QUICHE", "pareve": "CAN-VEG-SKEWER"}
-DIETARY_PACKAGE = {"vegan": "PKG-VEGAN", "vegetarian": "PKG-VEGAN"}
 
 
 def tiers_for(req: ExtractedRequest, plan: MenuPlan, catalog: list[CatalogItem],
@@ -21,24 +18,40 @@ def tiers_for(req: ExtractedRequest, plan: MenuPlan, catalog: list[CatalogItem],
             for t in build_tiers(req, plan, catalog, engine)]
 
 
-def standard_plan(req: ExtractedRequest) -> MenuPlan:
-    """A sensible default menu: one package for the main group, one per dietary group."""
+def _pick(catalog: list[CatalogItem], use: DefaultUse, meal: str,
+          tag: str | None = None) -> CatalogItem | None:
+    """The catalog item marked for `use`, preferring the event's exact meal type, then any
+    compatible one (pareve fits meat and dairy). Nothing here knows any item by name."""
+    allowed = ALLOWED_MEAL.get(MealType(meal), {MealType(meal)})
+    cands = [i for i in catalog if use in i.default_use and i.meal_type in allowed
+             and (tag is None or tag in {t.value for t in i.tags} or i.meal_type == "pareve")]
+    cands.sort(key=lambda i: (i.meal_type.value != meal, i.sku))
+    return cands[0] if cands else None
+
+
+def standard_plan(req: ExtractedRequest, catalog: list[CatalogItem]) -> MenuPlan:
+    """A sensible default menu from the catalog's defaults: the main package, a package per
+    dietary group, a reception item and drinks."""
     guests = req.guest_count or 0
+    meal = req.meal_type.value if req.meal_type else "meat"
     lines: list[MenuLine] = []
     special = 0
     for d in req.dietary_requirements:
-        sku = DIETARY_PACKAGE.get(d.tag.value)
-        if sku and d.guest_count and req.meal_type != "pareve":
-            lines.append(MenuLine(sku=sku, for_guests=d.guest_count, confidence="high",
+        pkg = _pick(catalog, DefaultUse.dietary_package, meal, d.tag.value)
+        if pkg and d.guest_count and req.meal_type != "pareve":
+            lines.append(MenuLine(sku=pkg.sku, for_guests=d.guest_count, confidence="high",
                                   reason=f"עבור {d.guest_count} אורחים {d.tag.value}"))
             special += d.guest_count
-    meal = req.meal_type.value if req.meal_type else "meat"
-    main = STANDARD_PACKAGE.get(meal, "PKG-MEAT-STD")
-    lines.insert(0, MenuLine(sku=main, for_guests=max(guests - special, 1) if guests else None,
-                             confidence="high", reason="חבילה מלאה לאירוע"))
-    lines.append(MenuLine(sku=RECEPTION.get(meal, "CAN-VEG-SKEWER"), confidence="medium",
-                          reason="קבלת פנים"))
-    lines.append(MenuLine(sku="DRK-SOFT", confidence="high", reason="שתייה לכל האורחים"))
+    main = _pick(catalog, DefaultUse.main_package, meal)
+    if main:
+        lines.insert(0, MenuLine(sku=main.sku,
+                                 for_guests=max(guests - special, 1) if guests else None,
+                                 confidence="high", reason="חבילה מלאה לאירוע"))
+    for use, conf, reason in ((DefaultUse.reception, "medium", "קבלת פנים"),
+                              (DefaultUse.drinks, "high", "שתייה לכל האורחים")):
+        item = _pick(catalog, use, meal)
+        if item:
+            lines.append(MenuLine(sku=item.sku, confidence=conf, reason=reason))
     return MenuPlan(lines=lines)
 
 

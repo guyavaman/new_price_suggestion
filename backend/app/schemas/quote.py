@@ -51,6 +51,9 @@ class QuoteLine(BaseModel):
     source: LineSource
     confidence: Confidence
     reason: str = ""
+    # owner-only cost snapshot at pricing time (None = cost unknown). Never sent to customers.
+    unit_cost: float | None = None
+    cost_group: str = "food"
 
 
 class BudgetCheck(BaseModel):

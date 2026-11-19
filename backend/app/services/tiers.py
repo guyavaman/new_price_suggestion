@@ -9,39 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.schemas.catalog import CatalogItem
-from app.schemas.extraction import ExtractedRequest, MealType
+from app.schemas.catalog import CatalogItem, DefaultUse
+from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import LineSource, MenuLine, MenuPlan, PricedQuote
 from app.services.pricing import ALLOWED_MEAL, PricingEngine
 
-UPGRADES = {
-    "PKG-MEAT-STD": "PKG-MEAT-PREM",
-    "PKG-CORP-LUNCH": "PKG-MEAT-STD",
-    "MAIN-SCHNITZEL": "MAIN-CHICK-PARG",
-    "MAIN-CHICK-PARG": "MAIN-ENTRECOTE",
-    "MAIN-CHICK-BREAST": "MAIN-ASADO",
-    "BAR-BEER": "BAR-COCKTAIL",
-    "EQP-DISP": "EQP-DISH-PREM",
-    "MAIN-QUICHE": "MAIN-SALMON",
-}
-DOWNGRADES = {
-    "PKG-MEAT-PREM": "PKG-MEAT-STD",
-    "MAIN-ENTRECOTE": "MAIN-CHICK-PARG",
-    "MAIN-ASADO": "MAIN-CHICK-PARG",
-    "MAIN-DENIS": "MAIN-SALMON",
-    "BAR-OPEN": "BAR-BEER",
-    "BAR-COCKTAIL": "BAR-BEER",
-    "EQP-DISH-PREM": "EQP-DISP",
-    "CAN-SUSHI": "CAN-SUSHI-VEG",
-}
-# extras the premium tier adds (if compatible and not already there)
-PREMIUM_EXTRAS = {
-    MealType.meat: ["STR-CARPACCIO", "DES-PETIT-FOUR", "DRK-COFFEE"],
-    MealType.dairy: ["STR-SALMON-CEV", "DES-PETIT-FOUR", "DRK-COFFEE"],
-    MealType.pareve: ["STR-SOUP-PUMP", "DES-PETIT-FOUR", "DRK-COFFEE"],
-}
-# categories the basic tier drops when they were only AI suggestions
-BASIC_DROPS = {"canape", "starter", "bar"}
+# Upgrades, downgrades, what the basic tier drops and what premium adds all come from the
+# business's catalog (upgrade_to, downgrade_to, basic_drop, default_use=premium_extra).
 
 TIER_NAMES = {"basic": "בסיס", "recommended": "מומלץ", "premium": "פרימיום"}
 
@@ -63,9 +37,10 @@ def build_tiers(req: ExtractedRequest, plan: MenuPlan, catalog: list[CatalogItem
                 engine: PricingEngine) -> list[Tier]:
     by_sku = {i.sku: i for i in catalog}
 
-    def swap(mapping: dict[str, str], line: MenuLine, changes: list[str]) -> MenuLine:
-        new = mapping.get(line.sku)
-        if line.source == LineSource.requested or not new or not _allowed(req, by_sku[new]):
+    def swap(direction: str, line: MenuLine, changes: list[str]) -> MenuLine:
+        new = getattr(by_sku[line.sku], direction)
+        if (line.source == LineSource.requested or not new or new not in by_sku
+                or not _allowed(req, by_sku[new])):
             return line
         changes.append(f"{by_sku[line.sku].name_he} ← {by_sku[new].name_he}")
         return line.model_copy(update={"sku": new, "reason": ""})
@@ -76,19 +51,19 @@ def build_tiers(req: ExtractedRequest, plan: MenuPlan, catalog: list[CatalogItem
     for ln in plan.lines:
         item = by_sku.get(ln.sku)
         if (item and ln.source != LineSource.requested
-                and item.category.value in BASIC_DROPS):
+                and item.basic_drop):
             basic_changes.append(f"בלי {item.name_he}")
             continue
-        basic_lines.append(swap(DOWNGRADES, ln, basic_changes) if item else ln)
+        basic_lines.append(swap("downgrade_to", ln, basic_changes) if item else ln)
 
     # premium
     prem_changes: list[str] = []
-    prem_lines = [swap(UPGRADES, ln, prem_changes) if ln.sku in by_sku else ln
+    prem_lines = [swap("upgrade_to", ln, prem_changes) if ln.sku in by_sku else ln
                   for ln in plan.lines]
     present = {ln.sku for ln in prem_lines}
-    meal = req.meal_type or MealType.pareve
-    for sku in PREMIUM_EXTRAS[meal]:
-        if sku not in present and sku in by_sku and _allowed(req, by_sku[sku]):
+    extras = [i for i in catalog if DefaultUse.premium_extra in i.default_use]
+    for sku in [i.sku for i in extras]:
+        if sku not in present and _allowed(req, by_sku[sku]):
             prem_lines.append(MenuLine(sku=sku, source=LineSource.suggested,
                                        confidence="high", reason="תוספת בחבילת פרימיום"))
             prem_changes.append(f"+ {by_sku[sku].name_he}")

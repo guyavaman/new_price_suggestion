@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 
 from app.business.settings import BusinessSettings
-from app.schemas.catalog import CatalogItem
+from app.schemas.catalog import CatalogItem, ItemRole
 from app.schemas.extraction import ExtractedRequest, Kashrut, MealType
 from app.schemas.quote import (
     BudgetCheck,
@@ -20,7 +20,12 @@ from app.schemas.quote import (
     PricedQuote,
     QuoteLine,
 )
+from app.services.costing import unit_cost
 
+ROLE_HE = {ItemRole.waiter: "מלצר", ItemRole.head_waiter: "מנהל אירוע",
+           ItemRole.bartender: "ברמן", ItemRole.supervision: "השגחת מהדרין",
+           ItemRole.setup: "הקמה ופירוק", ItemRole.delivery_center: "משלוח מרכז",
+           ItemRole.delivery_remote: "משלוח מרוחק"}
 BUDGET_TOLERANCE = 1.05
 DEFAULT_RULES = BusinessSettings(id="default", tenant_id="default")
 
@@ -61,6 +66,10 @@ class PricingEngine:
     def __init__(self, catalog: list[CatalogItem], vat_rate: float | None = None,
                  rules: BusinessSettings | None = None):
         self.by_sku = {i.sku: i for i in catalog}
+        self.by_role: dict[ItemRole, CatalogItem] = {}
+        for i in catalog:
+            if i.role and i.role not in self.by_role:
+                self.by_role[i.role] = i
         self.rules = rules or DEFAULT_RULES
         self.vat_rate = self.rules.vat_rate if vat_rate is None else vat_rate
 
@@ -70,6 +79,7 @@ class PricingEngine:
             sku=item.sku, name_he=item.name_he, unit=item.unit.value, unit_price=item.price,
             quantity=qty, total=_r2(qty * item.price), note=note, source=source,
             confidence=confidence, reason=reason,
+            unit_cost=unit_cost(item, self.by_sku), cost_group=item.cost_group.value,
         )
 
     def price(self, req: ExtractedRequest, plan: MenuPlan) -> PricedQuote:
@@ -114,8 +124,12 @@ class PricingEngine:
                 lines = kept
 
         # 3. business rules
-        def add(sku: str, qty: float, note: str) -> None:
-            lines.append(self._line(self.by_sku[sku], qty, note, LineSource.rule, Confidence.rule))
+        def add(role: ItemRole, qty: float, note: str) -> None:
+            item = self.by_role.get(role)
+            if item is None:  # the business's catalog has no item for this rule: say so
+                guards.append(f"חסר בקטלוג פריט בתפקיד '{ROLE_HE[role]}': השורה לא נוספה")
+                return
+            lines.append(self._line(item, qty, note, LineSource.rule, Confidence.rule))
 
         sv = req.service
         has_meal = any(self.by_sku[ln.sku].category.value in ("package", "main") for ln in lines)
@@ -125,25 +139,25 @@ class PricingEngine:
             )
             if want_waiters:
                 n = math.ceil(guests / R.waiter_ratio)
-                add("STF-WAITER", n * R.staff_hours,
+                add(ItemRole.waiter, n * R.staff_hours,
                     f"{n} מלצרים × {R.staff_hours} ש' (מלצר לכל {R.waiter_ratio})")
                 if guests >= R.head_waiter_from:
-                    add("STF-HEAD-WAITER", R.staff_hours, f"מנהל אירוע × {R.staff_hours} ש'")
+                    add(ItemRole.head_waiter, R.staff_hours, f"מנהל אירוע × {R.staff_hours} ש'")
             has_bar = any(self.by_sku[ln.sku].category.value == "bar" for ln in lines)
-            has_open_bar = any(ln.sku == "BAR-OPEN" for ln in lines)  # includes a bartender
-            if (sv.bar is True or has_bar) and not has_open_bar:
+            bar_staffed = any(self.by_sku[ln.sku].includes_bartender for ln in lines)
+            if (sv.bar is True or has_bar) and not bar_staffed:
                 n = math.ceil(guests / R.bartender_ratio)
-                add("STF-BARTENDER", n * R.staff_hours, f"{n} ברמנים × {R.staff_hours} ש'")
+                add(ItemRole.bartender, n * R.staff_hours, f"{n} ברמנים × {R.staff_hours} ש'")
             if req.kashrut == Kashrut.mehadrin:
-                add("LOG-MEHADRIN", guests, f"{guests} סועדים")
+                add(ItemRole.supervision, guests, f"{guests} סועדים")
         if sv.equipment is True or any(
             self.by_sku[ln.sku].category.value == "equipment" for ln in lines
         ):
-            add("LOG-SETUP", 1, "")
+            add(ItemRole.setup, 1, "")
         if lines:
             loc = (req.location or "").lower()
             remote = any(k in loc for k in R.remote_areas)
-            add("LOG-DELIVERY-F" if remote else "LOG-DELIVERY-C", 1,
+            add(ItemRole.delivery_remote if remote else ItemRole.delivery_center, 1,
                 f"ל{req.location}" if req.location else "אזור מרכז (ברירת מחדל)")
 
         # 4. totals

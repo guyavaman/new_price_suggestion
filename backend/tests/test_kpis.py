@@ -80,7 +80,7 @@ def test_migration_fills_won_at_and_net_value(tmp_path):
     legacy = crm.deals.put(Deal(tenant_id=T, customer_id=c.id, title="", value=11800,
                                 stage=DealStage.completed))
     assert legacy.won_at is None and legacy.value_net is None
-    assert migrations.run(tmp_path) == ["001_deal_won_at_and_net_value"]
+    assert migrations.run(tmp_path)[0] == "001_deal_won_at_and_net_value"
     d = crm.deals.get(T, legacy.id)
     assert d.value_net == 10000 and d.won_at is not None
     assert migrations.run(tmp_path) == []  # once only
@@ -107,3 +107,60 @@ def test_every_screen_reads_the_same_kpis(monkeypatch, tmp_path):
         assert today["kpis"]["booked_this_month_value"] == 30000
     finally:
         app.dependency_overrides.clear()
+
+
+def test_migration_fills_catalog_fields_without_overwriting(tmp_path):
+    from app.catalog.service import CatalogService
+    cs = CatalogService(tmp_path)
+    cs.update("acme", "STF-WAITER", {"price": 99})  # materializes the tenant copy
+    raw = migrations._read(tmp_path / "catalog.json")
+    for it in raw.values():  # simulate a pre-stage-1 copy
+        for f in ("role", "cost", "components"):
+            it.pop(f, None)
+    raw["acme:STF-WAITER"]["cost"] = 55  # the business's own value must survive
+    migrations._write(tmp_path / "catalog.json", raw)
+    migrations.run(tmp_path)
+    w = cs.get("acme", "STF-WAITER")
+    assert w.role == "waiter" and w.cost == 55 and w.price == 99
+    assert cs.get("acme", "PKG-MEAT-STD").components
+
+
+def test_profit_report_counts_only_complete_costs(tmp_path):
+    """Revenue covers every booked event; profit only the ones with full cost data."""
+    from app.business.kpis import profit_report
+    from app.repositories.quotes import JsonQuoteRepository, StoredQuote
+    from app.schemas.catalog import CatalogItem
+    from app.schemas.extraction import ExtractedRequest
+    from app.schemas.quote import (
+        Confidence,
+        LineSource,
+        MenuPlan,
+        PricedQuote,
+        QuoteLine,
+        TierQuote,
+    )
+    crm = CrmService(tmp_path, SettingsService(tmp_path))
+    repo = JsonQuoteRepository(tmp_path / "quotes.json")
+    pkg = CatalogItem(sku="P", name_he="חבילה", name_en="p", category="package",
+                      unit="per_guest", price=100, meal_type="meat")
+
+    def booked(net, unit_cost, etype):
+        ln = QuoteLine(sku="P", name_he="חבילה", unit="per_guest", unit_price=100,
+                       quantity=net / 100, total=net, source=LineSource.rule,
+                       confidence=Confidence.rule, unit_cost=unit_cost)
+        pq = PricedQuote(lines=[ln], subtotal=net, discount_rate=0, discount=0, net=net,
+                         vat=0, total=net)
+        q = repo.add(StoredQuote(tenant_id=T, number=repo.next_number(T), request=ExtractedRequest(
+            language="he"), plan=MenuPlan(lines=[]), tiers=[TierQuote(
+                key="recommended", name="מומלץ", plan=MenuPlan(lines=[]), quote=pq)]))
+        return _deal(crm, DealStage.won, net * 1.18, net, won_at=datetime(2026, 11, 3, tzinfo=UTC),
+                     quote_ids=[q.id], event_type=etype)
+
+    booked(10000, 60, "wedding")    # cost 6000, profit 4000
+    booked(5000, None, "wedding")   # cost unknown
+    r = profit_report(crm, repo, [pkg], T, crm.settings.get(T), TODAY)
+    nov = next(m for m in r.by_month if m.key == "2026-11")
+    assert (nov.events, nov.revenue, nov.profit, nov.missing_cost) == (2, 15000, 4000, 1)
+    assert nov.margin == 0.4  # 4000 / 10000: margin over the events that have a profit
+    wed = r.by_event_type[0]
+    assert wed.label == "חתונה" and wed.events == 2

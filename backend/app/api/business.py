@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from app.business.kpis import ProfitReport, profit_report
 from app.business.messages import CustomerMessage, customer_messages
 from app.business.operations import (
     AutomationAction,
@@ -27,9 +28,20 @@ from app.crm.models import ActivityKind, Actor, Deal
 from app.crm.service import CrmService
 from app.deps import get_catalog_service, get_crm, get_repo, get_settings_service, get_tenant
 from app.integrations.config import TenantConfig
-from app.schemas.catalog import CatalogItem
+from app.schemas.catalog import CatalogItem, CostSource
+from app.services.cost_impact import ImpactRow, impact_of
 
 router = APIRouter(tags=["business"])
+
+
+@router.get("/reports/profit", response_model=ProfitReport, tags=["profit"])
+def profit(months: int = 6, t: TenantConfig = Depends(get_tenant),
+           crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+           svc: CatalogService = Depends(get_catalog_service),
+           s: SettingsService = Depends(get_settings_service)):
+    """Owner-only: revenue and gross profit by month, event type, package and event."""
+    return profit_report(crm, repo, svc.all(t.tenant_id), t.tenant_id, s.get(t.tenant_id),
+                         months=max(1, min(months, 24)))
 
 
 @router.get("/crm/today", response_model=TodayView)
@@ -65,6 +77,13 @@ class ItemPatch(BaseModel):
     serves: int | None = None
     min_qty: int | None = None
     tags: list[str] | None = None
+    cost: float | None = Field(None, ge=0, description="Per unit, before VAT. null = unknown")
+    cost_source: CostSource | None = None
+
+
+class CatalogPatchOut(BaseModel):
+    item: TenantCatalogItem
+    cost_impact: list[ImpactRow] = Field(default_factory=list)
 
 
 @router.get("/catalog", response_model=list[TenantCatalogItem])
@@ -81,18 +100,56 @@ def add_item(item: CatalogItem, t: TenantConfig = Depends(get_tenant),
     return svc.upsert(t.tenant_id, item)
 
 
-@router.patch("/catalog/{sku}", response_model=TenantCatalogItem)
+@router.patch("/catalog/{sku}", response_model=CatalogPatchOut)
 def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
-               svc: CatalogService = Depends(get_catalog_service)):
+               svc: CatalogService = Depends(get_catalog_service),
+               crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+               s: SettingsService = Depends(get_settings_service)):
     patch = body.model_dump(exclude_unset=True)
     if "price" in patch and (patch["price"] is None or patch["price"] <= 0):
         raise HTTPException(422, "Price must be positive")
+    cur = svc.get(t.tenant_id, sku)
+    if cur is None:
+        raise HTTPException(404, "Item not found")
+    old_cost = cur.cost
+    if "cost" in patch:
+        if cur.components or cur.category.value == "package":
+            raise HTTPException(422, "עלות של חבילה מחושבת מהרכיבים שלה ולא מוזנת ידנית")
+        patch["cost_updated_at"] = datetime.now(UTC)
+        patch.setdefault("cost_source", CostSource.manual if patch["cost"] is not None else None)
     try:
-        return svc.update(t.tenant_id, sku, patch)
-    except KeyError as e:
-        raise HTTPException(404, "Item not found") from e
+        item = svc.update(t.tenant_id, sku, patch)
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
+    impact: list[ImpactRow] = []
+    rules = s.get(t.tenant_id)
+    if (old_cost is not None and item.cost is not None
+            and item.cost > old_cost * (1 + rules.cost_alert_threshold)):
+        impact = _impact(t.tenant_id, sku, svc, crm, repo)
+        if impact:
+            lost = -sum(r.delta for r in impact)
+            n_q = sum(r.kind == "open_quote" for r in impact)
+            n_e = len(impact) - n_q
+            crm.add_task(t.tenant_id,
+                         f"עלות {item.name_he} עלתה {item.cost / old_cost - 1:.0%}: "
+                         f"{n_q} הצעות פתוחות ו-{n_e} אירועים סגורים איבדו ₪{lost:,.0f} רווח",
+                         priority="high", created_by=Actor.system)
+    return CatalogPatchOut(item=item, cost_impact=impact)
+
+
+def _impact(tenant: str, sku: str, svc: CatalogService, crm: CrmService, repo):
+    return impact_of(sku, svc.items(tenant), repo.list(tenant), crm.deals.list(tenant),
+                     date.today())
+
+
+@router.get("/catalog/{sku}/cost-impact", response_model=list[ImpactRow])
+def cost_impact(sku: str, t: TenantConfig = Depends(get_tenant),
+                svc: CatalogService = Depends(get_catalog_service),
+                crm: CrmService = Depends(get_crm), repo=Depends(get_repo)):
+    """Open quotes and upcoming booked events whose profit changed since they were priced."""
+    if svc.get(t.tenant_id, sku) is None:
+        raise HTTPException(404, "Item not found")
+    return _impact(t.tenant_id, sku, svc, crm, repo)
 
 
 # ---------- calendar & kitchen ----------

@@ -75,8 +75,37 @@ def m001_deal_won_at_and_net_value(base: Path) -> int:
     return changed
 
 
+def m002_catalog_roles_and_costs(base: Path) -> int:
+    """Stage 1: tenant catalogs copied before stage 1 lack roles, defaults, tier links, costs and
+    package components. Fill each missing field from the base catalog item with the same SKU;
+    never overwrite what the business already set."""
+    from app.catalog.loader import load_catalog  # late import: migrations stay light
+    path = base / "catalog.json"
+    items = _read(path)
+    if not items:
+        return 0
+    ref = {i.sku: i.model_dump(mode="json") for i in load_catalog()}
+    fields = ("role", "includes_bartender", "default_use", "upgrade_to", "downgrade_to",
+              "basic_drop", "components", "cost", "cost_updated_at", "cost_source")
+    changed = 0
+    for it in items.values():
+        src = ref.get(it.get("sku"))
+        if not src:
+            continue
+        touched = False
+        for f in fields:
+            if it.get(f) in (None, [], False) and src.get(f) not in (None, [], False):
+                it[f] = src[f]
+                touched = True
+        changed += touched
+    if changed:
+        _write(path, items)
+    return changed
+
+
 MIGRATIONS: list[tuple[str, Callable[[Path], int]]] = [
     ("001_deal_won_at_and_net_value", m001_deal_won_at_and_net_value),
+    ("002_catalog_roles_and_costs", m002_catalog_roles_and_costs),
 ]
 
 

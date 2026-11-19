@@ -42,6 +42,7 @@ from app.llm.client import LLMClient, ToolSpec
 from app.schemas.catalog import CatalogItem
 from app.schemas.extraction import ContactInfo, DietaryRequirement, ExtractedRequest, RequestedItem
 from app.schemas.quote import MenuPlan
+from app.services.costing import profit_check
 from app.services.menu import compatible_catalog
 from app.services.pricing import PricingEngine
 from app.services.quotes import create_quote, standard_plan, tiers_for
@@ -77,6 +78,7 @@ SYSTEM_PROMPT = """\
 - ברגע שיש פרט חדש על האירוע או על הלקוח, קראי ל-save_lead עם מה שידוע.
 - כשיש תאריך, בדקי זמינות עם check_availability לפני שאת מתקדמת.
 - כשידועים מספר אורחים וסוג ארוחה, אפשר לתת הערכה עם estimate_price.
+- אם כלי מחזיר needs_human: אל תמסרי שום מחיר או הערכה, וקראי ל-handoff_to_human כמו שכתוב בו.
 - כשיש תאריך, אורחים, סוג ארוחה ושם+טלפון, הציעי הצעת מחיר מסודרת וקראי ל-create_quote.
   שלחי ללקוח את customer_link שהכלי מחזיר: שם הוא בוחר חבילה, מאשר ומשלם מקדמה בעצמו.
 - לקוח שרוצה לסגור, מבקש נציג, כועס, או שואל משהו שאין לך כלי בשבילו -> handoff_to_human.
@@ -325,10 +327,28 @@ class _Session:
         req = ExtractedRequest(language="he", guest_count=self._guests(guest_count),
                                meal_type=meal_type, kashrut=kashrut,
                                service={"waiters": guest_count >= 60})
-        tiers = tiers_for(req, standard_plan(req), self.a.catalog, self.a.engine)
+        tiers = tiers_for(req, standard_plan(req, self.a.catalog), self.a.catalog,
+                          self.a.engine)
+        # the agent may only quote prices that clear the profit floor with full cost data;
+        # the reason stays internal (it's in the owner's task, never in the tool output)
+        ok_tiers = [t for t in tiers if profit_check(t.quote, self.a.rules.profit_floor)[0]]
+        if not any(t.key == "recommended" for t in ok_tiers):
+            return self._needs_human(tiers, "הערכת מחיר")
         return {"note": "הערכה ראשונית כולל מע\"מ, צוות ומשלוח. ההצעה הסופית תלויה בתפריט.",
                 "packages": [{"name": t.name, "total": t.quote.total,
-                              "per_guest": t.quote.per_guest} for t in tiers]}
+                              "per_guest": t.quote.per_guest} for t in ok_tiers]}
+
+    def _needs_human(self, tiers, what: str) -> dict:
+        """A price the agent may not give. Note why for the owner (internal), tell the model
+        only that a person will price it."""
+        reasons = [f"{t.name}: {profit_check(t.quote, self.a.rules.profit_floor)[1]}"
+                   for t in tiers if not profit_check(t.quote, self.a.rules.profit_floor)[0]]
+        d = self.deal()
+        self.crm.add_task(self.tenant, f"{what} דורשת תמחור ידני: " + "; ".join(reasons),
+                          deal_id=d.id if d else None, priority="high", created_by=Actor.agent)
+        return {"needs_human": True,
+                "instruction": "אל תמסרי מחיר. אמרי ללקוח שנציג יכין לו הצעה מדויקת "
+                               "וקראי ל-handoff_to_human עם reason 'נדרש תמחור ידני'."}
 
     def save_lead(self, **f) -> dict:
         d = self.deal()
@@ -375,11 +395,20 @@ class _Session:
                 plan = self.a.planner(req)
             except Exception:
                 plan = None  # planner down: fall back to the standard menu, still a real quote
-        plan = plan or standard_plan(req)
+        plan = plan or standard_plan(req, self.a.catalog)
         q = create_quote(self.a.repo, self.tenant, req, plan, self.a.catalog, self.a.engine,
                          source_message="\n".join(m.text for m in self.conv.messages
                                                   if m.role == ChatRole.user))
         rec = q.tier("recommended").quote
+        blocked = [t for t in q.tiers if not profit_check(t.quote, self.a.rules.profit_floor)[0]]
+        if blocked:  # keep it as a draft for the owner; no link, no price to the customer
+            d.quote_ids.append(q.id)
+            d.set_value(rec.total, rec.net)
+            self.crm.save_deal(d)
+            self.crm.log(self.tenant, ActivityKind.quote,
+                         f"טיוטת הצעה {q.number} נוצרה בצ'אט וממתינה לתמחור ידני",
+                         Actor.agent, deal_id=d.id, meta={"quote_id": q.id})
+            return self._needs_human(q.tiers, f"הצעה {q.number}")
         d.quote_ids.append(q.id)
         d.set_value(rec.total, rec.net)
         d = self.crm.save_deal(d)

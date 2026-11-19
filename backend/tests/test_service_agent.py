@@ -127,3 +127,54 @@ def test_replies_are_plain_text():
     raw = "נשארה יתרה של **12,047 ₪**\n## סיכום\nתודה"
     assert plain_text(raw) == "נשארה יתרה של 12,047 ₪\nסיכום\nתודה"
     assert plain_text("2*3 = 6") == "2*3 = 6"
+
+
+# ---------- stage 1: the agent never prices below the floor or with missing cost ----------
+
+def _sales(env, turns, floor):
+    env["settings"].update(T, {"profit_floor": floor})
+    return _agent(env, turns)
+
+
+def test_agent_gives_no_estimate_below_floor(env):
+    agent, script = _sales(env, [
+        _resp([_tool("1", "estimate_price", {"guest_count": 100, "meal_type": "meat"})]),
+        _resp([_text("נציג יכין לך הצעה מדויקת")]),
+    ], floor=0.95)
+    r = agent.chat(T, "כמה עולה אירוע בשרי ל-100 איש?")
+    out = r.actions[0]["output"]
+    assert out["needs_human"] and "packages" not in out
+    text = str(out)
+    assert "רצפה" not in text and "עלות" not in text and "%" not in text  # reason stays internal
+    task = next(t for t in env["crm"].tasks.list(T) if "תמחור ידני" in t.title)
+    assert "מתחת לרצפה" in task.title and task.priority == "high"
+
+
+def test_agent_estimate_ok_above_floor(env):
+    agent, _ = _sales(env, [
+        _resp([_tool("1", "estimate_price", {"guest_count": 100, "meal_type": "meat"})]),
+        _resp([_text("הנה הערכה")]),
+    ], floor=0.3)
+    out = agent.chat(T, "כמה עולה אירוע בשרי ל-100 איש?").actions[0]["output"]
+    assert out["packages"] and all("cost" not in str(p) for p in out["packages"])
+
+
+def test_agent_quote_with_missing_cost_stays_a_draft_for_the_owner(env):
+    from app.crm.models import Deal, DealStage
+    c = env["crm"].upsert_customer(T, name="רות", phone="0501112222")
+    d = env["crm"].save_deal(Deal(tenant_id=T, customer_id=c.id, title="", guest_count=60,
+                                  meal_type="dairy", stage=DealStage.new))
+    agent, _ = _sales(env, [
+        _resp([_tool("1", "create_quote", {})]),
+        _resp([_text("נציג יחזור אלייך עם הצעה")]),
+    ], floor=0.3)
+    conv_deal = env["crm"].deals.get(T, d.id)
+    from app.crm.models import Conversation
+    conv = env["crm"].conversations.put(Conversation(tenant_id=T, deal_id=conv_deal.id,
+                                                     customer_id=c.id))
+    r = agent.chat(T, "תשלחי הצעה", conv.id)
+    out = r.actions[0]["output"]
+    assert out["needs_human"] and "customer_link" not in out
+    q = env["repo"].get(T, env["crm"].deals.get(T, d.id).quote_ids[-1])
+    assert q.status == "draft"  # the owner prices it
+    assert any("עלות חסרה" in t.title for t in env["crm"].tasks.list(T))
