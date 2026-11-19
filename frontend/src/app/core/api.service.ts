@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -49,8 +49,8 @@ export class ApiService {
   editQuote(id: string, instruction: string): Observable<EditOut> {
     return this.http.post<EditOut>(this.u(`/quotes/${id}/edit`), { instruction });
   }
-  setQuoteStatus(quoteId: string, status: QuoteStatus | string, tier?: string, note?: string): Observable<QuoteOut> {
-    return this.http.post<QuoteOut>(this.u(`/quotes/${quoteId}/status`), { status, tier, note });
+  setQuoteStatus(quoteId: string, status: QuoteStatus | string, tier?: string, note?: string, overrideFloor = false): Observable<QuoteOut> {
+    return this.http.post<QuoteOut>(this.u(`/quotes/${quoteId}/status`), { status, tier, note, override_floor: overrideFloor });
   }
 
   customers(q?: string): Observable<Customer[]> {
@@ -85,7 +85,14 @@ export class ApiService {
   kitchen(day: string): Observable<KitchenSheet> { return this.http.get<KitchenSheet>(this.u('/kitchen'), { params: { day } }); }
   catalog(): Observable<CatalogItem[]> { return this.http.get<CatalogItem[]>(this.u('/catalog')); }
   addItem(item: Partial<CatalogItem>): Observable<CatalogItem> { return this.http.post<CatalogItem>(this.u('/catalog'), item); }
-  patchItem(sku: string, patch: Partial<CatalogItem>): Observable<CatalogItem> { return this.http.patch<CatalogItem>(this.u(`/catalog/${sku}`), patch); }
+  patchItem(sku: string, patch: Partial<CatalogItem>): Observable<{ item: CatalogItem; cost_impact: ImpactRow[] }> { return this.http.patch<{ item: CatalogItem; cost_impact: ImpactRow[] }>(this.u(`/catalog/${sku}`), patch); }
+  importCatalog(file: File, apply = false): Observable<ImportReport> {
+    const fd = new FormData(); fd.append('file', file);
+    return this.http.post<ImportReport>(this.u(`/catalog/import${apply ? '?apply=true' : ''}`), fd);
+  }
+  importTemplate(): Observable<Blob> { return this.http.get(this.u('/catalog/import/template'), { responseType: 'blob' }); }
+  quoteProfit(id: string): Observable<QuoteProfit> { return this.http.get<QuoteProfit>(this.u(`/quotes/${id}/profit`)); }
+  profitReport(months = 6): Observable<ProfitReport> { return this.http.get<ProfitReport>(this.u(`/reports/profit?months=${months}`)); }
   settings(): Observable<BusinessSettings> { return this.http.get<BusinessSettings>(this.u('/settings')); }
   saveSettings(patch: Partial<BusinessSettings>): Observable<BusinessSettings> { return this.http.patch<BusinessSettings>(this.u('/settings'), patch); }
   invoice(dealId: string, number?: string): Observable<Deal> { return this.http.post<Deal>(this.u(`/crm/deals/${dealId}/invoice`), { number: number ?? null }); }

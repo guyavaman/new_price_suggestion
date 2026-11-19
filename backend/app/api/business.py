@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from app.business.kpis import ProfitReport, profit_report
@@ -23,6 +23,7 @@ from app.business.operations import (
     today_view,
 )
 from app.business.settings import BusinessSettings, SettingsService
+from app.catalog.importer import ImportReport, analyze, template_xlsx
 from app.catalog.service import CatalogService, TenantCatalogItem
 from app.crm.models import ActivityKind, Actor, Deal
 from app.crm.service import CrmService
@@ -30,6 +31,7 @@ from app.deps import get_catalog_service, get_crm, get_repo, get_settings_servic
 from app.integrations.config import TenantConfig
 from app.schemas.catalog import CatalogItem, CostSource
 from app.services.cost_impact import ImpactRow, impact_of
+from app.services.costing import missing_parts, unit_cost
 
 router = APIRouter(tags=["business"])
 
@@ -86,10 +88,26 @@ class CatalogPatchOut(BaseModel):
     cost_impact: list[ImpactRow] = Field(default_factory=list)
 
 
-@router.get("/catalog", response_model=list[TenantCatalogItem])
+class CatalogRow(TenantCatalogItem):
+    """Owner view of an item: its cost as the engine computes it (packages from components)."""
+    unit_cost: float | None = None
+    cost_missing: list[str] = Field(default_factory=list)
+    item_margin: float | None = None  # (price - cost) / price
+
+
+@router.get("/catalog", response_model=list[CatalogRow])
 def list_catalog(t: TenantConfig = Depends(get_tenant),
                  svc: CatalogService = Depends(get_catalog_service)):
-    return svc.all(t.tenant_id)
+    items = svc.all(t.tenant_id)
+    by_sku = {i.sku: i for i in items}
+    rows = []
+    for i in items:
+        uc = unit_cost(i, by_sku)
+        rows.append(CatalogRow(**i.model_dump(), unit_cost=uc,
+                               cost_missing=[] if uc is not None else missing_parts(i, by_sku),
+                               item_margin=round((i.price - uc) / i.price, 4)
+                               if uc is not None and i.price else None))
+    return rows
 
 
 @router.post("/catalog", response_model=TenantCatalogItem, status_code=201)
@@ -140,6 +158,50 @@ def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
 def _impact(tenant: str, sku: str, svc: CatalogService, crm: CrmService, repo):
     return impact_of(sku, svc.items(tenant), repo.list(tenant), crm.deals.list(tenant),
                      date.today())
+
+
+@router.get("/catalog/import/template", tags=["import"])
+def import_template(t: TenantConfig = Depends(get_tenant),
+                    svc: CatalogService = Depends(get_catalog_service)) -> Response:
+    """Excel to fill in: the current menu with a cost column, package components, a legend."""
+    return Response(template_xlsx(svc.all(t.tenant_id)), headers={
+        "Content-Disposition": 'attachment; filename="menu-and-costs.xlsx"'},
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@router.post("/catalog/import", response_model=ImportReport, tags=["import"])
+async def import_catalog(file: UploadFile, apply: bool = False,
+                         t: TenantConfig = Depends(get_tenant),
+                         svc: CatalogService = Depends(get_catalog_service),
+                         crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                         s: SettingsService = Depends(get_settings_service)) -> ImportReport:
+    """Preview (default) or apply an Excel/CSV of items, prices and costs. Apply writes the
+    valid rows only; the report lists every rejected row and why."""
+    data = await file.read()
+    if len(data) > 5_000_000:
+        raise HTTPException(413, "הקובץ גדול מדי (עד 5MB)")
+    current = svc.all(t.tenant_id)
+    report, items = analyze(file.filename or "file.xlsx", data, current)
+    if not apply:
+        return report
+    old_cost = {i.sku: i.cost for i in current}
+    for item, active in items:
+        cur = svc.get(t.tenant_id, item.sku)
+        svc.upsert(t.tenant_id, CatalogItem.model_validate(item.model_dump()),
+                   active=active if active is not None else (cur.active if cur else True))
+    threshold = s.get(t.tenant_id).cost_alert_threshold
+    rises = [i.sku for i, _ in items if old_cost.get(i.sku) and i.cost
+             and i.cost > old_cost[i.sku] * (1 + threshold)]
+    rows = {r.quote_id: r for sku in rises for r in _impact(t.tenant_id, sku, svc, crm, repo)}
+    if rows:
+        lost = -sum(r.delta for r in rows.values())
+        crm.add_task(t.tenant_id, f"ייבוא עלויות: {len(rises)} פריטים התייקרו, "
+                                  f"{len(rows)} הצעות/אירועים איבדו ₪{lost:,.0f} רווח",
+                     priority="high", created_by=Actor.system)
+    crm.log(t.tenant_id, ActivityKind.note,
+            f"ייבוא תפריט: {len(report.creates)} חדשים, {len(report.updates)} עודכנו, "
+            f"{len(report.errors)} שורות נדחו", Actor.user)
+    return report.model_copy(update={"applied": True})
 
 
 @router.get("/catalog/{sku}/cost-impact", response_model=list[ImpactRow])

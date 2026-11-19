@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
 import { CONFIDENCE, EVENT_TYPE, KASHRUT, LINE_SOURCE, MEAL, QUOTE_STATUS, REJECT_REASONS, UNIT, dietLabel } from '../core/labels';
-import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
+import { EditOut, QuoteProfit, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
 
 @Component({
   selector: 'app-quote-detail',
@@ -29,6 +29,18 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
           }
         </div>
       </div>
+
+      @if (confirmSend()) {
+        <section class="card confirm-send" role="alertdialog" aria-labelledby="cs-h">
+          <h2 id="cs-h">לשלוח בכל זאת?</h2>
+          <ul>@for (b of profit()?.send_blockers ?? []; track b) { <li>{{ b }}</li> }</ul>
+          <p class="muted">אם תאשר, ההצעה תסומן כנשלחה וההחלטה תירשם בציר הזמן של האירוע.</p>
+          <div class="row">
+            <button class="btn danger" (click)="setStatus('sent', true)">שליחה באישורי</button>
+            <button class="btn ghost" (click)="confirmSend.set(false)">ביטול</button>
+          </div>
+        </section>
+      }
 
       @if (askReject()) {
         <form class="card rejectbox" (ngSubmit)="reject()">
@@ -71,6 +83,47 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
           </button>
         }
       </div>
+
+      @if (tierProfit(); as tp) {
+        <section class="card profit" [class.alarm]="tp.summary.status === 'missing' || tp.summary.below_floor" aria-label="רווחיות החבילה">
+          <div class="profit-head">
+            <h2>רווח בחבילת {{ tp.name }}</h2>
+            <small class="muted">רק לך · לפני מע"מ · רצפה {{ pct(profit()!.floor) }}</small>
+          </div>
+          @if (tp.summary.status === 'missing') {
+            <div class="bar hatched" role="img" aria-label="עלות חסרה, אין חישוב רווח"><span>עלות חסרה</span></div>
+            <p class="miss-line">אי אפשר לחשב רווח עד שתוזן עלות ל: <b>{{ tp.missing_detail.join(', ') }}</b>.
+              <a routerLink="/menu">להזנת עלויות ←</a></p>
+          } @else {
+            <div class="bar" role="img" [attr.aria-label]="'רווח ' + pct(tp.summary.margin!)">
+              @for (g of tp.summary.by_group; track g.group) {
+                @if (g.cost) { <i class="seg g-{{ g.group }}" [style.flex-grow]="g.cost" [title]="g.label + ': ' + (g.cost | ils)"></i> }
+              }
+              <i class="seg profit-seg" [class.low]="tp.summary.below_floor" [style.flex-grow]="max0(tp.summary.gross_profit!)"></i>
+              <b class="floor-mark" [style.inset-inline-end.%]="profit()!.floor * 100" aria-hidden="true"></b>
+            </div>
+            <div class="profit-figs">
+              <div><span>מחיר לפני מע"מ</span><b class="num">{{ tp.summary.revenue_net | ils }}</b></div>
+              <div><span>עלות</span><b class="num">{{ tp.summary.total_cost | ils }}</b></div>
+              <div class="big" [class.low]="tp.summary.below_floor"><span>רווח גולמי</span><b class="num">{{ tp.summary.gross_profit | ils }} · {{ pct(tp.summary.margin!) }}</b></div>
+            </div>
+            @if (tp.summary.below_floor) { <p class="floor-warn">הרווח מתחת לרצפה שהגדרת ({{ pct(profit()!.floor) }}). שליחה תדרוש אישור מפורש.</p> }
+          }
+          <ul class="legend">
+            @for (g of tp.summary.by_group; track g.group) {
+              <li><i class="dot g-{{ g.group }}"></i>{{ g.label }} <span class="num">@if (g.cost !== null) { {{ g.cost | ils }} } @else { <em>חסר</em> }</span></li>
+            }
+          </ul>
+          <details class="all-tiers"><summary>שלוש החבילות</summary>
+            <table><tbody>
+              @for (x of profit()!.tiers; track x.key) {
+                <tr><td>{{ x.name }}</td><td class="num">{{ x.summary.revenue_net | ils }}</td>
+                  <td class="num">@if (x.summary.margin !== null) { <span [class.low]="x.summary.below_floor">{{ x.summary.gross_profit | ils }} · {{ pct(x.summary.margin) }}</span> } @else { <span class="miss-tag">עלות חסרה</span> }</td></tr>
+              }
+            </tbody></table>
+          </details>
+        </section>
+      }
 
       @if (tier(); as t) {
         <section class="card doc">
@@ -130,6 +183,30 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
     }
   `,
   styles: [`
+    .profit { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
+    .profit > * { min-width: 0; }
+    .profit.alarm { border-color: var(--warn); }
+    .profit-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .bar { position: relative; display: flex; height: 26px; border-radius: 6px; overflow: hidden; background: var(--paper); direction: rtl; }
+    .seg { display: block; min-width: 2px; }
+    .g-food { background: #8f9c6a; } .g-staff { background: #5d6e86; } .g-equipment { background: #a98c62; } .g-logistics { background: #7f6d8f; }
+    .profit-seg { background: var(--ok); } .profit-seg.low { background: var(--bad); }
+    .floor-mark { position: absolute; top: -3px; bottom: -3px; width: 0; border-inline-start: 2px dashed var(--ink); }
+    .bar.hatched { align-items: center; justify-content: center; background: repeating-linear-gradient(-45deg, var(--warn-soft) 0 8px, #f6e4c3 8px 16px); color: var(--warn); font-weight: 700; font-size: .85rem; }
+    .profit-figs { display: flex; gap: 22px; flex-wrap: wrap; }
+    .profit-figs div { display: grid; } .profit-figs span { font-size: .78rem; color: var(--muted); }
+    .profit-figs .big b { font-family: var(--display); font-size: 1.35rem; color: var(--ok); }
+    .profit-figs .big.low b, .low { color: var(--bad); }
+    .floor-warn { margin: 0; background: var(--bad-soft); color: var(--bad); border-radius: 8px; padding: 6px 10px; font-weight: 600; }
+    .miss-line { margin: 0; color: var(--warn); }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; list-style: none; padding: 0; margin: 0; font-size: .85rem; color: var(--muted); }
+    .legend .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-inline-end: 5px; vertical-align: -1px; }
+    .legend em { color: var(--warn); font-style: normal; font-weight: 700; }
+    .miss-tag { color: var(--warn); font-weight: 700; font-size: .85rem; white-space: nowrap; }
+    .all-tiers summary { cursor: pointer; color: var(--olive); font-weight: 600; }
+    .all-tiers table { width: 100%; border-collapse: collapse; } .all-tiers td { padding: 4px 6px; border-top: 1px solid var(--line); }
+    .confirm-send { margin-top: 14px; border-color: var(--bad); display: grid; gap: 6px; }
+    .confirm-send ul { margin: 0; color: var(--bad); } .confirm-send .row { display: flex; gap: 8px; flex-wrap: wrap; }
     .back { display: inline-block; margin-bottom: 10px; text-decoration: none; }
     .page-head p { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -163,6 +240,7 @@ import { EditOut, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
     .chip.on { background: var(--bad-soft); border-color: var(--bad); color: var(--bad); }
     .rejected-why { margin-top: 14px; background: var(--bad-soft); color: var(--bad); }
     .cols.single { grid-template-columns: 1fr; }
+    .cols > * { min-width: 0; } .mail { overflow-wrap: anywhere; }
     @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
     h2 { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
     .edit { display: flex; gap: 6px; } .edit input { flex: 1; min-width: 0; }
@@ -208,7 +286,14 @@ export class QuoteDetailComponent {
 
   constructor() { effect(() => this.load(this.id()), { allowSignalWrites: true }); }
 
+  profit = signal<QuoteProfit | null>(null);
+  confirmSend = signal(false);
+  tierProfit = computed(() => this.profit()?.tiers.find((t) => t.key === this.view()) ?? null);
+  pct(x: number) { return `${Math.round(x * 100)}%`; }
+  max0(x: number) { return Math.max(0, x); }
+
   load(id = this.id()) {
+    this.api.quoteProfit(id).subscribe({ next: (p) => this.profit.set(p), error: () => this.profit.set(null) });
     this.api.quote(id).subscribe({
       next: (q) => { this.q.set(q); this.view.set(q.selected_tier); },
       error: () => this.error.set('ההצעה לא נמצאה או שהשרת לא זמין'),
@@ -221,10 +306,11 @@ export class QuoteDetailComponent {
       error: (e) => this.error.set(e.error?.detail ?? 'לא ניתן לעדכן סטטוס'),
     });
   }
-  setStatus(s: QuoteStatus) {
-    this.api.setQuoteStatus(this.id(), s, s === 'approved' ? this.view() : undefined).subscribe({
-      next: (r) => { this.q.set(r.quote); this.load(); },
-      error: (e) => this.error.set(e.error?.detail ?? 'לא ניתן לעדכן סטטוס'),
+  setStatus(s: QuoteStatus, overrideFloor = false) {
+    if (s === 'sent' && !overrideFloor && this.profit()?.send_blockers.length) { this.confirmSend.set(true); return; }
+    this.api.setQuoteStatus(this.id(), s, s === 'approved' ? this.view() : undefined, undefined, overrideFloor).subscribe({
+      next: (r) => { this.confirmSend.set(false); this.q.set(r.quote); this.load(); },
+      error: (e) => this.error.set(typeof e.error?.detail === 'string' ? e.error.detail : e.error?.detail?.message ?? 'לא ניתן לעדכן סטטוס'),
     });
   }
   edit() {

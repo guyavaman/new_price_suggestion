@@ -378,3 +378,19 @@ def test_sending_below_floor_needs_explicit_owner_approval(env):
         assert any(a.meta.get("override_floor") for a in env["crm"].timeline(T, deal.id))
     finally:
         app.dependency_overrides.clear()
+
+
+def test_import_api_preview_then_apply(env):
+    c, h = _api(env)
+    try:
+        tpl = c.get("/catalog/import/template", headers=h)
+        assert tpl.status_code == 200 and tpl.content[:2] == b"PK"  # an xlsx
+        csv_data = b'sku,cost\nSAL-ISR,999\nNOPE,1\n'
+        files = {"file": ("costs.csv", csv_data, "text/csv")}
+        prev = c.post("/catalog/import", headers=h, files=files).json()
+        assert not prev["applied"] and prev["updates"][0]["fields"]["cost"][1] == 999
+        assert prev["errors"] and env["catalog"].get(T, "SAL-ISR").cost != 999  # nothing written
+        done = c.post("/catalog/import?apply=true", headers=h, files=files).json()
+        assert done["applied"] and env["catalog"].get(T, "SAL-ISR").cost == 999
+    finally:
+        app.dependency_overrides.clear()

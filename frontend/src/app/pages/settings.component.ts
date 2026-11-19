@@ -49,6 +49,14 @@ import { BusinessSettings } from '../core/models';
           </div>
         </section>
         <section class="card">
+          <h2>רווחיות ועלויות</h2>
+          <div class="fields">
+            <label>רצפת רווח גולמי (%)<input name="pf" type="number" min="0" max="95" [ngModel]="pct(s.profit_floor)" (ngModelChange)="s.profit_floor = $event / 100"></label>
+            <label>התראה על עליית עלות מעל (%)<input name="ct" type="number" min="0" max="100" [ngModel]="pct(s.cost_alert_threshold)" (ngModelChange)="s.cost_alert_threshold = $event / 100"></label>
+          </div>
+          <p class="muted">הצעה מתחת לרצפה או עם עלות חסרה תדרוש אישור לפני שליחה, ונועה תעביר אותה אליך במקום לתת מחיר.</p>
+        </section>
+        <section class="card">
           <h2>הצעות, מקדמה ותזכורות</h2>
           <div class="fields">
             <label>תוקף הצעה (ימים)<input name="qv" type="number" min="1" [(ngModel)]="s.quote_valid_days"></label>

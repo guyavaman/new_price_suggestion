@@ -181,6 +181,31 @@ export interface KitchenSheet {
 export interface CatalogItem {
   sku: string; name_he: string; name_en: string; category: string; unit: string; price: number; meal_type: string;
   tags: string[]; serves: number | null; min_qty: number | null; description_he: string; active: boolean;
+  // owner-only cost data
+  cost?: number | null; cost_updated_at?: string | null; cost_source?: 'manual' | 'recipe' | 'supplier' | 'components' | null;
+  components?: { sku: string; quantity: number; per_guests: number }[];
+  unit_cost?: number | null; cost_missing?: string[]; item_margin?: number | null;
+}
+export interface ImpactRow {
+  kind: 'open_quote' | 'booked_event'; quote_id: string; quote_number: string; deal_id: string | null; title: string;
+  event_date: string | null; profit_before: number; profit_after: number; margin_before: number | null; margin_after: number | null; delta: number;
+}
+export interface ImportReport {
+  rows: number; unchanged: number; applied: boolean;
+  creates: { sku: string; name: string }[];
+  updates: { sku: string; name: string; fields: Record<string, [unknown, unknown]> }[];
+  errors: { sheet: string; row: number; column: string; message: string }[];
+}
+export interface CostSummary {
+  status: 'complete' | 'missing'; revenue_net: number; total_cost: number | null; gross_profit: number | null; margin: number | null;
+  by_group: { group: string; label: string; revenue: number; cost: number | null }[];
+  missing: { sku: string; name: string }[]; below_floor: boolean | null; floor: number | null;
+}
+export interface QuoteProfit { floor: number; tiers: { key: string; name: string; summary: CostSummary; missing_detail: string[] }[]; send_blockers: string[] }
+export interface ProfitRow { key: string; label: string; events: number; revenue: number; profit: number | null; margin: number | null; missing_cost: number }
+export interface ProfitReport {
+  floor: number; by_month: ProfitRow[]; by_event_type: ProfitRow[]; by_package: ProfitRow[];
+  events: { deal_id: string; title: string; event_date: string | null; event_type: string | null; package: string | null; revenue: number; cost: number | null; profit: number | null; margin: number | null; missing: string[] }[];
 }
 export interface BusinessSettings {
   business_name: string; phone: string; email: string; business_id: string; vat_rate: number;
@@ -188,7 +213,7 @@ export interface BusinessSettings {
   canapes_per_guest: number; volume_discounts: { min_subtotal: number; rate: number }[]; remote_areas: string[];
   max_events_per_day: number; max_guests_per_day: number; quote_valid_days: number; deposit_rate: number;
   payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
-  invoice_provider: string; service_info: string;
+  invoice_provider: string; service_info: string; profit_floor: number; cost_alert_threshold: number; timezone?: string;
 }
 export interface PublicQuote {
   business_name: string; business_phone: string; business_email?: string; business_id?: string; vat_rate?: number; created_at?: string | null;

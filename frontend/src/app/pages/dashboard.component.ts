@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe, RelativePipe } from '../core/format';
 import { EVENT_TYPE, SOURCE, STAGE_LABEL } from '../core/labels';
-import { Dashboard } from '../core/models';
+import { Dashboard, ProfitReport } from '../core/models';
 
 @Component({
   selector: 'app-dashboard',
@@ -70,6 +70,50 @@ import { Dashboard } from '../core/models';
         </section>
       </div>
     }
+    @if (pr(); as pr) {
+      <section class="card profit-rep" aria-labelledby="pr-h">
+        <div class="pr-head">
+          <h2 id="pr-h">רווחיות (אירועים שנסגרו)</h2>
+          <small class="muted">לפני מע"מ · רווח גולמי = הכנסה אחרי הנחה פחות עלויות ישירות · רצפה {{ pct(pr.floor) }}</small>
+        </div>
+        <div class="pr-tabs" role="tablist">
+          @for (t of prTabs; track t.key) {
+            <button role="tab" [attr.aria-selected]="prTab() === t.key" [class.on]="prTab() === t.key" (click)="prTab.set(t.key)">{{ t.label }}</button>
+          }
+        </div>
+        @if (prTab() !== 'events') {
+          <table class="pr-table">
+            <thead><tr><th></th><th>אירועים</th><th>הכנסה</th><th>רווח גולמי</th><th>רווחיות</th></tr></thead>
+            <tbody>
+              @for (r of prRows(); track r.key) {
+                <tr>
+                  <td>{{ prTab() === 'by_month' ? month(r.key) : r.label }}</td><td class="num">{{ r.events }}</td><td class="num">{{ r.revenue | ils }}</td>
+                  <td class="num">@if (r.profit !== null) { {{ r.profit | ils }} } @else { — }</td>
+                  <td><div class="mcell"><span class="num" [class.low]="r.margin !== null && r.margin < pr.floor">{{ pct(r.margin) }}</span>
+                    @if (r.missing_cost) { <span class="miss-tag" title="אירועים בלי עלות מלאה לא נכללים ברווח">{{ r.missing_cost }} בלי עלות</span> }</div></td>
+                </tr>
+              } @empty { <tr><td colspan="5" class="empty">אין עדיין אירועים סגורים בתקופה</td></tr> }
+            </tbody>
+          </table>
+        } @else {
+          <table class="pr-table">
+            <thead><tr><th>אירוע</th><th>תאריך</th><th>הכנסה</th><th>עלות</th><th>רווח</th></tr></thead>
+            <tbody>
+              @for (e of pr.events; track e.deal_id) {
+                <tr>
+                  <td><a [routerLink]="['/deals', e.deal_id]">{{ e.title }}</a></td>
+                  <td>{{ e.event_date ? (e.event_date | heDate) : '—' }}</td>
+                  <td class="num">{{ e.revenue | ils }}</td>
+                  <td class="num">@if (e.cost !== null) { {{ e.cost | ils }} } @else { <span class="miss-tag" [title]="e.missing.join(', ')">עלות חסרה</span> }</td>
+                  <td class="num">@if (e.profit !== null) { <span [class.low]="e.margin! < pr.floor">{{ e.profit | ils }} · {{ pct(e.margin) }}</span> } @else { — }</td>
+                </tr>
+              } @empty { <tr><td colspan="5" class="empty">אין אירועים סגורים</td></tr> }
+            </tbody>
+          </table>
+        }
+        <p class="muted note">אירוע בלי עלות מלאה מוצג בנפרד ולא נכנס לחישוב הרווח, כדי שלא יוצג רווח שלא באמת ידוע.</p>
+      </section>
+    }
   `,
   styles: [`
     .alerts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -92,6 +136,19 @@ import { Dashboard } from '../core/models';
     .row .bar.src i { background: var(--honey); }
     .cnt { text-align: end; font-weight: 700; }
     .val { text-align: end; font-size: .85rem; }
+    .profit-rep { margin-top: 14px; display: grid; gap: 10px; }
+    .pr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .pr-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .pr-tabs button { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 4px 12px; cursor: pointer; font: inherit; }
+    .pr-tabs button.on { background: var(--olive); color: #fff; border-color: var(--olive); }
+    .pr-table { width: 100%; border-collapse: collapse; }
+    .pr-table th { text-align: start; font-size: .8rem; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+    .pr-table td { padding: 6px; border-top: 1px solid var(--line); }
+    .low { color: var(--bad); font-weight: 700; }
+    .miss-tag { margin-inline-start: 6px; font-size: .75rem; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 1px 6px; white-space: nowrap; }
+    .note { margin: 0; font-size: .8rem; }
+    .mcell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .mcell .miss-tag { margin: 0; }
+    @media (max-width: 640px) { .pr-table th:nth-child(2), .pr-table td:nth-child(2) { display: none; } }
   `],
 })
 export class DashboardComponent {
@@ -105,11 +162,18 @@ export class DashboardComponent {
   sources = computed(() => Object.entries(this.d()?.kpis.sources ?? {}).map(([key, n]) => ({ key, n })).sort((a, b) => b.n - a.n));
   maxSource = computed(() => Math.max(1, ...this.sources().map((s) => s.n)));
 
+  pr = signal<ProfitReport | null>(null);
+  prTabs = [{ key: 'by_month', label: 'לפי חודש' }, { key: 'by_event_type', label: 'לפי סוג אירוע' }, { key: 'by_package', label: 'לפי חבילה' }, { key: 'events', label: 'לפי אירוע' }] as const;
+  prTab = signal<'by_month' | 'by_event_type' | 'by_package' | 'events'>('by_month');
+  prRows = computed(() => { const r = this.pr(); const t = this.prTab(); return r && t !== 'events' ? r[t] : []; });
+
   constructor() {
+    this.api.profitReport(6).subscribe({ next: (r) => this.pr.set(r), error: () => this.pr.set(null) });
     this.api.dashboard().subscribe({
       next: (d) => this.d.set(d),
       error: () => this.error.set('השרת לא זמין. הפעילו את ה-backend על פורט 8000.'),
     });
   }
+  month(key: string) { const [y, m] = key.split('-').map(Number); return new Date(y, m - 1, 1).toLocaleDateString('he-IL', { month: 'long', year: 'numeric' }); }
   pct(v: number | null) { return v == null ? '—' : Math.round(v * 100) + '%'; }
 }
