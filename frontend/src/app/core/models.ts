@@ -114,22 +114,17 @@ export interface DealDetail {
   conversation: Conversation | null;
 }
 
-export interface Dashboard {
+/** One KPI set for every screen (backend app/business/kpis.py, docs/KPIS.md). Money before VAT. */
+export interface Kpis {
+  as_of: string; vat_included: boolean;
   stages: { stage: DealStage; count: number; value: number }[];
-  open_pipeline_value: number;
-  won_value_this_month: number;
-  won_count_this_month: number;
-  win_rate: number | null;
-  avg_won_value: number | null;
-  hot_leads: number;
-  overdue_tasks: number;
-  open_tasks: number;
-  handed_off_chats: number;
-  escalated_chats: number;
-  chat_conversion: number | null;
-  sources: Record<string, number>;
-  upcoming_events: Deal[];
+  open_pipeline_value: number; quotes_waiting: number; quotes_waiting_value: number;
+  booked_this_month_value: number; booked_this_month_count: number; deposits_this_month: number;
+  win_rate: number | null; avg_booked_value: number | null; hot_leads: number;
+  open_tasks: number; overdue_tasks: number; handed_off_chats: number; escalated_chats: number;
+  chat_conversion: number | null; sources: Record<string, number>;
 }
+export interface Dashboard { kpis: Kpis; upcoming_events: Deal[]; }
 
 export interface ChatReply {
   conversation_id: string;
@@ -175,7 +170,7 @@ export interface TodayView {
   tasks_due: (Task & { deal_title: string | null })[];
   events_this_week: { id: string; title: string; stage: DealStage; value: number | null; event_date: string; temperature: Temperature; guests: number | null; deposit_paid: number; final_count_confirmed: boolean }[];
   hot_leads: { id: string; title: string; stage: DealStage; value: number | null; event_date: string | null; temperature: Temperature }[];
-  quotes_waiting: number; open_quotes_value: number; deposits_this_month: number; won_this_month: number;
+  kpis: Kpis;
 }
 export interface CalendarDay { date: string; deals: { id: string; title: string; stage: DealStage; guests: number | null; temperature: Temperature }[]; events_booked: number; guests_booked: number; full: boolean }
 export interface KitchenItem { sku: string; name: string; category: string; quantity: number; unit: string; serves: number | null; events: { deal_id: string; title: string; quantity: number }[] }

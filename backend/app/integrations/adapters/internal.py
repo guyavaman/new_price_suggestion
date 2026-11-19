@@ -45,7 +45,7 @@ class InternalCrmAdapter:
             self.crm.log(t, ActivityKind.quote, f"הצעת מחיר {deal_info.quote_number} נוצרה",
                          Actor.system, deal_id=deal.id, customer_id=cust.id,
                          meta={"quote_id": deal_info.quote_id})
-        deal.value = deal_info.amount_total
+        deal.set_value(deal_info.amount_total, deal_info.amount_net)
         deal = self.crm.save_deal(deal)
         stage = STAGE_FOR_EVENT.get(event.type)
         if stage == DealStage.quoted and deal.stage != DealStage.new:

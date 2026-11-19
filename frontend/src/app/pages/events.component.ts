@@ -42,7 +42,7 @@ import { Deal, DealStage } from '../core/models';
       <div class="board" cdkDropListGroup>
         @for (s of boardStages; track s.key) {
           <section class="col stage-{{ s.key }}">
-            <header><b>{{ s.label }}</b><span class="num muted">{{ byStage()[s.key].length }} · {{ total(s.key) | ils }}</span></header>
+            <header><b>{{ s.label }}</b><span class="num muted">{{ byStage()[s.key].length }}@if (total(s.key) !== null) { · <span title="לפני מע&quot;מ" data-kpi-stage>{{ total(s.key) | ils }}</span> }</span></header>
             <div class="list" cdkDropList [cdkDropListData]="s.key" (cdkDropListDropped)="drop($event)">
               @for (d of byStage()[s.key]; track d.id) {
                 <article class="deal" cdkDrag [cdkDragData]="d" (click)="open(d)">
@@ -139,8 +139,13 @@ export class EventsComponent {
   });
 
   constructor() { this.load(); }
-  load() { this.api.deals().subscribe({ next: (d) => this.deals.set(d), error: () => this.error.set('השרת לא זמין') }); }
-  total(stage: DealStage) { return this.byStage()[stage].reduce((s, d) => s + (d.value ?? 0), 0); }
+  private stageKpis = signal<Record<string, number>>({});
+  load() {
+    this.api.deals().subscribe({ next: (d) => this.deals.set(d), error: () => this.error.set('השרת לא זמין') });
+    this.api.dashboard().subscribe((x) => this.stageKpis.set(Object.fromEntries(x.kpis.stages.map((s) => [s.stage, s.value]))));
+  }
+  /** Column total = the shared KPI (before VAT). Hidden while searching: it would describe a different set. */
+  total(stage: DealStage): number | null { return this.q().trim() ? null : this.stageKpis()[stage] ?? null; }
 
   drop(ev: CdkDragDrop<DealStage>) {
     this.dragging = true;

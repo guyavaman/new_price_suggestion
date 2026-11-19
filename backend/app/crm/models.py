@@ -95,6 +95,7 @@ class Deal(BaseModel):
     title: str
     stage: DealStage = DealStage.new
     value: float | None = Field(None, description="Expected value incl. VAT (quote or estimate)")
+    value_net: float | None = Field(None, description="Same value before VAT: what KPIs use")
     event_type: str | None = None
     event_date: date | None = None
     guest_count: int | None = None
@@ -120,6 +121,10 @@ class Deal(BaseModel):
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
     stage_changed_at: datetime = Field(default_factory=now)
+    won_at: datetime | None = Field(None, description="First time the deal was booked (won)")
+
+    def set_value(self, total: float | None, net: float | None) -> None:
+        self.value, self.value_net = total, net
 
     @computed_field
     @property

@@ -334,6 +334,8 @@ def accuracy(store: CorrectionStore = Depends(get_corrections)) -> list[dict]:
 
 @app.on_event("startup")
 def _seed_demo() -> None:
+    from app import migrations
+    migrations.run()  # bring stored data up to the current schema before anything reads it
     if os.environ.get("SEED_DEMO") == "1" and not get_crm().deals.list("demo"):
         from scripts.seed_crm import seed
         seed(reset=True)

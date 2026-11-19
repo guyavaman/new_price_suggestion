@@ -73,16 +73,17 @@ def test_availability_capacity(crm):
 
 def test_dashboard(crm):
     c = crm.upsert_customer(T, name="x", phone="0500000000")
-    won = crm.save_deal(Deal(tenant_id=T, customer_id=c.id, title="", value=40000,
-                             event_date=EVENT_DAY, source=Source.web_chat))
+    won = crm.save_deal(Deal(tenant_id=T, customer_id=c.id, title="", value=47200,
+                             value_net=40000, event_date=EVENT_DAY, source=Source.web_chat))
     crm.move_stage(T, won.id, DealStage.won)
     lost = crm.save_deal(Deal(tenant_id=T, customer_id=c.id, title="", value=10000))
     crm.move_stage(T, lost.id, DealStage.lost, reason="מחיר")
-    crm.save_deal(Deal(tenant_id=T, customer_id=c.id, title="", value=25000,
-                       stage=DealStage.quoted))
+    crm.save_deal(Deal(tenant_id=T, customer_id=c.id, title="", value=29500,
+                       stage=DealStage.quoted))  # no value_net: derived before VAT (29500/1.18)
     dash = crm.dashboard(T)
-    assert dash.open_pipeline_value == 25000 and dash.won_value_this_month == 40000
-    assert dash.win_rate == 0.5 and dash.upcoming_events[0].id == won.id
+    k = dash.kpis
+    assert k.open_pipeline_value == 25000 and k.booked_this_month_value == 40000
+    assert k.win_rate == 0.5 and dash.upcoming_events[0].id == won.id
 
 
 # ---------- sales agent (scripted model) ----------
@@ -269,7 +270,7 @@ def test_crm_api_flow(api, crm):
     assert {a["kind"] for a in detail["timeline"]} >= {"note", "stage", "task"}
     assert c.get("/crm/customers?q=0509998888", headers=h).json()[0]["name"] == "יוסי"
     dash = c.get("/crm/dashboard", headers=h).json()
-    assert dash["open_pipeline_value"] == 0 and dash["open_tasks"] == 1
+    assert dash["kpis"]["open_pipeline_value"] == 0 and dash["kpis"]["open_tasks"] == 1
     assert c.get(f"/crm/deals/{did}", headers={"X-Tenant-ID": "nope"}).status_code == 404
 
 

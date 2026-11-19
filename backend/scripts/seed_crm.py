@@ -55,6 +55,9 @@ SAMPLES = [
     ("הדס יעקב", "0505656565", "birthday", 11, 40, "pareve", "kosher", "quoted", True, "web_chat"),
 ]
 
+# how long ago each booked deal was closed: some this month, some earlier (month KPIs)
+BOOKED_DAYS_AGO = {"נטע אברהם": 2, "דנה שפירא": 9, "עומר פרץ": 40, "גיא שמש": 55}
+
 CHAT = [
     ("user", "היי, אני מתכננת בר מצווה לבן שלי, בערך 120 איש"),
     ("assistant", "מזל טוב! 🎉 באיזה תאריך ובשרי או חלבי?"),
@@ -107,7 +110,8 @@ def seed(reset: bool = False) -> None:
             q.status = QUOTE_STATUS_FOR_STAGE[stage]
             q.history.append(StatusChange(status=q.status))
             repo.save(q)
-            d.quote_ids, d.value = [q.id], q.tier().quote.total
+            d.quote_ids = [q.id]
+            d.set_value(q.tier().quote.total, q.tier().quote.net)
             if stage in ("won", "completed"):
                 deposit = round(d.value * 0.3, 2)
                 d.payments = [Payment(amount=deposit, status="paid", paid_at=now())]
@@ -119,6 +123,12 @@ def seed(reset: bool = False) -> None:
         if stage != "new":
             crm.move_stage(TENANT, d.id, DealStage(stage), Actor.agent if src == "web_chat"
                            else Actor.user, "המחיר גבוה מהתקציב" if stage == "lost" else None)
+        if stage in ("won", "completed"):  # booked some time ago, deposit paid that day
+            d = crm.deals.get(TENANT, d.id)
+            d.won_at = now() - timedelta(days=BOOKED_DAYS_AGO.get(name, 5))
+            for p in d.payments:
+                p.paid_at = d.won_at
+            crm.save_deal(d)
         if src == "web_chat":
             if i == 0:
                 script = CHAT

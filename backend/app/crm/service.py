@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from collections import Counter
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from app.business import kpis
+from app.business.kpis import Kpis
 from app.business.settings import SettingsService
 from app.crm.models import (
-    OPEN_STAGES,
     STAGE_HE,
     Activity,
     ActivityKind,
@@ -46,26 +46,9 @@ class Availability(BaseModel):
     note: str
 
 
-class StageSummary(BaseModel):
-    stage: DealStage
-    count: int
-    value: float
-
-
 class Dashboard(BaseModel):
-    stages: list[StageSummary]
-    open_pipeline_value: float
-    won_value_this_month: float
-    won_count_this_month: int
-    win_rate: float | None
-    avg_won_value: float | None
-    hot_leads: int
-    overdue_tasks: int
-    open_tasks: int
-    handed_off_chats: int
-    escalated_chats: int = 0
-    chat_conversion: float | None
-    sources: dict[str, int]
+    """Reports screen: the shared KPI set plus the upcoming events list."""
+    kpis: Kpis
     upcoming_events: list[Deal]
 
 
@@ -133,6 +116,8 @@ class CrmService:
             return deal
         old = deal.stage
         deal.stage, deal.stage_changed_at = stage, now()
+        if stage == DealStage.won and deal.won_at is None:
+            deal.won_at = deal.stage_changed_at
         if stage == DealStage.lost:
             deal.lost_reason = reason
         self.save_deal(deal)
@@ -194,36 +179,11 @@ class CrmService:
 
     # ---------- dashboard ----------
     def dashboard(self, tenant: str, today: date | None = None) -> Dashboard:
-        today = today or date.today()
-        deals = self.deals.list(tenant)
-        by_stage = {s: [d for d in deals if d.stage == s] for s in DealStage}
-        month_start = datetime(today.year, today.month, 1, tzinfo=UTC)
-        won_month = [d for d in by_stage[DealStage.won] if d.stage_changed_at >= month_start]
-        closed = len(by_stage[DealStage.won]) + len(by_stage[DealStage.lost])
-        won_vals = [d.value for d in by_stage[DealStage.won] if d.value]
-        tasks = self.tasks.list(tenant, lambda t: not t.done)
-        convs = self.conversations.list(tenant)
-        chat_deals = [c for c in convs if c.deal_id]
-        horizon = today + timedelta(days=30)
-        return Dashboard(
-            stages=[StageSummary(stage=s, count=len(v),
-                                 value=round(sum(d.value or 0 for d in v), 2))
-                    for s, v in by_stage.items()],
-            open_pipeline_value=round(
-                sum(d.value or 0 for d in deals if d.stage in OPEN_STAGES), 2),
-            won_value_this_month=round(sum(d.value or 0 for d in won_month), 2),
-            won_count_this_month=len(won_month),
-            win_rate=round(len(by_stage[DealStage.won]) / closed, 3) if closed else None,
-            avg_won_value=round(sum(won_vals) / len(won_vals), 2) if won_vals else None,
-            hot_leads=sum(1 for d in deals if d.stage in OPEN_STAGES and d.temperature == "hot"),
-            overdue_tasks=sum(1 for t in tasks if t.due_at and t.due_at < now()),
-            open_tasks=len(tasks),
-            handed_off_chats=sum(1 for c in convs if c.status == "handed_off"),
-            escalated_chats=sum(1 for c in convs if c.escalated and c.status != "closed"),
-            chat_conversion=round(len(chat_deals) / len(convs), 3) if convs else None,
-            sources=dict(Counter(d.source.value for d in deals)),
-            upcoming_events=sorted(
-                [d for d in deals if d.event_date and today <= d.event_date <= horizon
-                 and d.stage in (DealStage.won, DealStage.quoted)],
-                key=lambda d: d.event_date),
-        )
+        rules = self.settings.get(tenant)
+        k = kpis.compute(self, tenant, rules, today)
+        horizon = k.as_of + timedelta(days=30)
+        upcoming = sorted([d for d in self.deals.list(tenant)
+                           if d.event_date and k.as_of <= d.event_date <= horizon
+                           and d.stage in (DealStage.won, DealStage.quoted)],
+                          key=lambda d: d.event_date)
+        return Dashboard(kpis=k, upcoming_events=upcoming)

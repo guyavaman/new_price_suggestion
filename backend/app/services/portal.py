@@ -231,7 +231,7 @@ class CustomerPortal:
         self._emit(q, EventType.approved)  # moves the deal to won via the CRM adapter
         deal = self._deal(q)
         if deal and deal.stage != DealStage.won:  # no integration configured: do it directly
-            deal.value = q.tier().quote.total
+            deal.set_value(q.tier().quote.total, q.tier().quote.net)
             self.crm.save_deal(deal)
             self.crm.move_stage(q.tenant_id, deal.id, DealStage.won, Actor.customer)
 
@@ -254,7 +254,7 @@ class CustomerPortal:
         deal = self._deal(q)
         if deal:
             deal.final_guest_count, deal.guest_count = guests, guests
-            deal.value = q.tier().quote.total
+            deal.set_value(q.tier().quote.total, q.tier().quote.net)
             self.crm.save_deal(deal)
             self.crm.log(q.tenant_id, ActivityKind.quote,
                          f"הלקוח אישר מספר אורחים סופי: {guests} (היה {old}). "

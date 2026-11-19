@@ -21,9 +21,9 @@ import { TodayView } from '../core/models';
     @if (error()) { <div class="err">{{ error() }}</div> }
     @if (v(); as v) {
       <div class="money">
-        <div class="card"><span>מקדמות שנכנסו החודש</span><b class="num">{{ v.deposits_this_month | ils }}</b></div>
-        <div class="card"><span>נסגר החודש</span><b class="num">{{ v.won_this_month | ils }}</b></div>
-        <a class="card" routerLink="/events"><span>הצעות שמחכות לתשובה</span><b class="num">{{ v.quotes_waiting }}</b><small class="muted num">{{ v.open_quotes_value | ils }}</small></a>
+        <div class="card"><span>מקדמות שנכנסו החודש</span><b class="num" data-kpi="deposits_this_month">{{ v.kpis.deposits_this_month | ils }}</b></div>
+        <div class="card"><span>נסגר החודש</span><b class="num" data-kpi="booked_this_month_value">{{ v.kpis.booked_this_month_value | ils }}</b><small class="muted">{{ v.kpis.booked_this_month_count }} אירועים · לפני מע"מ</small></div>
+        <a class="card" routerLink="/events"><span>הצעות שמחכות לתשובה</span><b class="num">{{ v.kpis.quotes_waiting }}</b><small class="muted num" data-kpi="quotes_waiting_value">{{ v.kpis.quotes_waiting_value | ils }} לפני מע"מ</small></a>
       </div>
 
       <div class="cols">

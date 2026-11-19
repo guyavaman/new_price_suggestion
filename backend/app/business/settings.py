@@ -30,6 +30,7 @@ class BusinessSettings(BaseModel):
     business_id: str = Field("", description="ח.פ / עוסק מורשה")
     # pricing
     vat_rate: float = Field(0.18, ge=0, le=0.5)
+    timezone: str = Field("Asia/Jerusalem", description="Day/month boundaries of every KPI")
     waiter_ratio: int = Field(15, ge=1, description="one waiter per N guests")
     bartender_ratio: int = Field(75, ge=1)
     head_waiter_from: int = Field(80, ge=1)

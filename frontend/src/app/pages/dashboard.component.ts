@@ -17,23 +17,23 @@ import { Dashboard } from '../core/models';
     @if (error()) { <div class="err">{{ error() }}</div> }
     @if (d(); as d) {
       <div class="alerts">
-        @if (d.escalated_chats) { <a routerLink="/conversations" class="alert bad">🔥 {{ d.escalated_chats }} לקוחות מתוסכלים מחכים למענה</a> }
-        @if (d.handed_off_chats) { <a routerLink="/conversations" class="alert bad">{{ d.handed_off_chats }} שיחות מהסוכן ממתינות לנציג</a> }
-        @if (d.overdue_tasks) { <a routerLink="/tasks" class="alert warn">{{ d.overdue_tasks }} משימות באיחור</a> }
-        @if (d.hot_leads) { <a routerLink="/pipeline" class="alert hot">{{ d.hot_leads }} לידים חמים (ציון 70+)</a> }
+        @if (d.kpis.escalated_chats) { <a routerLink="/conversations" class="alert bad">🔥 {{ d.kpis.escalated_chats }} לקוחות מתוסכלים מחכים למענה</a> }
+        @if (d.kpis.handed_off_chats) { <a routerLink="/conversations" class="alert bad">{{ d.kpis.handed_off_chats }} שיחות מהסוכן ממתינות לנציג</a> }
+        @if (d.kpis.overdue_tasks) { <a routerLink="/tasks" class="alert warn">{{ d.kpis.overdue_tasks }} משימות באיחור</a> }
+        @if (d.kpis.hot_leads) { <a routerLink="/pipeline" class="alert hot">{{ d.kpis.hot_leads }} לידים חמים (ציון 70+)</a> }
       </div>
       <div class="kpis">
-        <div class="card kpi"><span>Pipeline פתוח</span><b class="num">{{ d.open_pipeline_value | ils }}</b></div>
-        <div class="card kpi"><span>נסגר החודש</span><b class="num">{{ d.won_value_this_month | ils }}</b><small>{{ d.won_count_this_month }} עסקאות</small></div>
-        <div class="card kpi"><span>אחוז סגירה</span><b class="num">{{ pct(d.win_rate) }}</b><small>מתוך עסקאות שהסתיימו</small></div>
-        <div class="card kpi"><span>עסקה ממוצעת</span><b class="num">{{ d.avg_won_value | ils }}</b></div>
-        <div class="card kpi"><span>המרת צ'אט לליד</span><b class="num">{{ pct(d.chat_conversion) }}</b><small>שיחות סוכן AI</small></div>
+        <div class="card kpi"><span>Pipeline פתוח</span><b class="num">{{ d.kpis.open_pipeline_value | ils }}</b></div>
+        <div class="card kpi"><span>נסגר החודש</span><b class="num" data-kpi="booked_this_month_value">{{ d.kpis.booked_this_month_value | ils }}</b><small>{{ d.kpis.booked_this_month_count }} אירועים · לפני מע"מ</small></div>
+        <div class="card kpi"><span>אחוז סגירה</span><b class="num">{{ pct(d.kpis.win_rate) }}</b><small>מתוך עסקאות שהסתיימו</small></div>
+        <div class="card kpi"><span>עסקה ממוצעת</span><b class="num">{{ d.kpis.avg_booked_value | ils }}</b></div>
+        <div class="card kpi"><span>המרת צ'אט לליד</span><b class="num">{{ pct(d.kpis.chat_conversion) }}</b><small>שיחות סוכן AI</small></div>
       </div>
       <div class="cols">
         <section class="card">
           <h2>לפי שלב</h2>
           <div class="funnel">
-            @for (s of d.stages; track s.stage) {
+            @for (s of d.kpis.stages; track s.stage) {
               <a class="row stage-{{ s.stage }}" routerLink="/pipeline">
                 <span class="lbl">{{ stageLabel[s.stage] }}</span>
                 <span class="bar"><i [style.width.%]="(s.count / maxCount()) * 100"></i></span>
@@ -101,8 +101,8 @@ export class DashboardComponent {
   stageLabel = STAGE_LABEL;
   sourceLabel = SOURCE;
   eventType = EVENT_TYPE;
-  maxCount = computed(() => Math.max(1, ...(this.d()?.stages.map((s) => s.count) ?? [1])));
-  sources = computed(() => Object.entries(this.d()?.sources ?? {}).map(([key, n]) => ({ key, n })).sort((a, b) => b.n - a.n));
+  maxCount = computed(() => Math.max(1, ...(this.d()?.kpis.stages.map((s) => s.count) ?? [1])));
+  sources = computed(() => Object.entries(this.d()?.kpis.sources ?? {}).map(([key, n]) => ({ key, n })).sort((a, b) => b.n - a.n));
   maxSource = computed(() => Math.max(1, ...this.sources().map((s) => s.n)));
 
   constructor() {

@@ -13,6 +13,8 @@ from datetime import date, datetime, timedelta
 import httpx
 from pydantic import BaseModel, Field
 
+from app.business import kpis
+from app.business.kpis import Kpis
 from app.business.messages import final_count_text, followup_text
 from app.business.settings import BusinessSettings
 from app.catalog.service import TenantCatalogItem
@@ -288,16 +290,12 @@ class TodayView(BaseModel):
     tasks_due: list[dict]
     events_this_week: list[dict]
     hot_leads: list[dict]
-    quotes_waiting: int
-    open_quotes_value: float
-    deposits_this_month: float
-    won_this_month: float
+    kpis: Kpis  # the same numbers as the reports screen, from one place
 
 
 def today_view(crm: CrmService, tenant: str, today: date | None = None) -> TodayView:
     today = today or date.today()
     end_of_day = datetime.combine(today, datetime.max.time()).astimezone()
-    month_start = datetime(today.year, today.month, 1).astimezone()
     deals = crm.deals.list(tenant)
     convs = crm.conversations.list(tenant, lambda c: c.status in ("handed_off", "human"))
     waiting = sorted(convs, key=lambda c: (not c.escalated, c.updated_at))
@@ -310,10 +308,6 @@ def today_view(crm: CrmService, tenant: str, today: date | None = None) -> Today
                   key=lambda d: d.event_date)
     hot = sorted([d for d in deals if d.stage in (DealStage.new, DealStage.quoted)
                   and d.temperature == "hot"], key=lambda d: -d.lead_score)
-    payments = [p for d in deals for p in d.payments
-                if p.status == "paid" and p.paid_at and p.paid_at >= month_start]
-    won_month = [d for d in deals if d.stage in (DealStage.won, DealStage.completed)
-                 and d.stage_changed_at >= month_start]
 
     def card(d: Deal) -> dict:
         return {"id": d.id, "title": d.title, "stage": d.stage.value, "value": d.value,
@@ -333,9 +327,5 @@ def today_view(crm: CrmService, tenant: str, today: date | None = None) -> Today
                            "final_count_confirmed": d.final_guest_count is not None}
                           for d in week],
         hot_leads=[card(d) for d in hot[:8]],
-        quotes_waiting=sum(1 for d in deals if d.stage == DealStage.quoted),
-        open_quotes_value=round(sum(d.value or 0 for d in deals
-                                    if d.stage == DealStage.quoted), 2),
-        deposits_this_month=round(sum(p.amount for p in payments), 2),
-        won_this_month=round(sum(d.value or 0 for d in won_month), 2),
+        kpis=kpis.compute(crm, tenant, crm.settings.get(tenant), today),
     )

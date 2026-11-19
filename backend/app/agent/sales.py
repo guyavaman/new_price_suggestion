@@ -381,7 +381,7 @@ class _Session:
                                                   if m.role == ChatRole.user))
         rec = q.tier("recommended").quote
         d.quote_ids.append(q.id)
-        d.value = rec.total
+        d.set_value(rec.total, rec.net)
         d = self.crm.save_deal(d)
         self.crm.move_stage(self.tenant, d.id, DealStage.quoted, Actor.agent)
         self.crm.log(self.tenant, ActivityKind.quote, f"הצעת מחיר {q.number} נוצרה בצ'אט",
