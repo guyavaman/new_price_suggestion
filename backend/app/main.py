@@ -40,7 +40,7 @@ from app.schemas.catalog import CatalogItem
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import QuoteStatus, TierQuote
 from app.services.corrections import Correction, CorrectionStore, Review
-from app.services.costing import CostSummary, missing_parts, profit_check, summarize
+from app.services.costing import CostSummary, fill_missing, missing_parts, profit_check, summarize
 from app.services.editing import EditService
 from app.services.extraction import ExtractionService
 from app.services.menu import MenuPlanner
@@ -177,11 +177,12 @@ def quote_profit(q: StoredQuote, catalog: list[CatalogItem], floor: float) -> Qu
     by_sku = {i.sku: i for i in catalog}
     tiers, blockers = [], []
     for t in q.tiers:
-        s = summarize(t.quote, floor)
+        priced = fill_missing(t.quote, by_sku)
+        s = summarize(priced, floor)
         detail = sorted({p for m in s.missing if m["sku"] in by_sku
                          for p in (missing_parts(by_sku[m["sku"]], by_sku) or [m["name"]])})
         tiers.append(TierProfit(key=t.key, name=t.name, summary=s, missing_detail=detail))
-        ok, why = profit_check(t.quote, floor)
+        ok, why = profit_check(priced, floor)
         if not ok:
             blockers.append(f"{t.name}: {why}")
     return QuoteProfit(floor=floor, tiers=tiers, send_blockers=blockers)

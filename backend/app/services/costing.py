@@ -80,6 +80,24 @@ class CostSummary(BaseModel):
     floor: float | None = None
 
 
+def fill_missing(quote, by_sku: dict[str, CatalogItem]):
+    """A quote with every unknown line cost filled from the current menu.
+
+    A line's cost is a snapshot from when the quote was priced, so later price changes don't
+    rewrite history. A cost that was unknown then is different: once the owner enters it,
+    the quote should use it instead of staying "missing" forever. Known costs are kept."""
+    if all(ln.unit_cost is not None for ln in quote.lines):
+        return quote
+    lines = []
+    for ln in quote.lines:
+        if ln.unit_cost is None and ln.sku in by_sku:
+            cost = unit_cost(by_sku[ln.sku], by_sku)
+            if cost is not None:
+                ln = ln.model_copy(update={"unit_cost": cost})
+        lines.append(ln)
+    return quote.model_copy(update={"lines": lines})
+
+
 def summarize(quote, floor: float | None = None) -> CostSummary:
     """Cost summary of a PricedQuote, from its lines' cost snapshot."""
     groups: dict[str, dict] = {g.value: {"revenue": 0.0, "cost": 0.0, "complete": True}

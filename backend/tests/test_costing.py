@@ -5,7 +5,7 @@ import pytest
 from app.schemas.catalog import CatalogItem, Component, DefaultUse, ItemRole
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import MenuLine, MenuPlan
-from app.services.costing import missing_parts, profit_check, summarize, unit_cost
+from app.services.costing import fill_missing, missing_parts, profit_check, summarize, unit_cost
 from app.services.pricing import PricingEngine
 from app.services.quotes import standard_plan
 
@@ -109,3 +109,19 @@ def test_lines_snapshot_cost(cat):
     q = _quote(cat, [MenuLine(sku="A-PKG", confidence="high")])
     pkg = next(ln for ln in q.lines if ln.sku == "A-PKG")
     assert pkg.unit_cost == 22.0 and pkg.cost_group == "food"
+
+
+def test_cost_entered_later_fills_a_missing_snapshot_but_not_a_known_one(cat):
+    """Owner enters the missing cost after the quote was made: the quote stops being "missing".
+    A cost that was known when the quote was priced stays as it was (history isn't rewritten)."""
+    q = _quote(cat, [MenuLine(sku="A-PKG-GAP", confidence="high"),
+                     MenuLine(sku="A-SALAD", confidence="high")])
+    assert summarize(q).status == "missing"
+    now = [i.model_copy(update={"cost": 4}) if i.sku == "A-NOCOST" else
+           i.model_copy(update={"cost": 999}) if i.sku == "A-SALAD" else i for i in cat]
+    filled = fill_missing(q, by(now))
+    s = summarize(filled, floor=0.3)
+    assert s.status == "complete" and s.margin is not None
+    salad = next(ln for ln in filled.lines if ln.sku == "A-SALAD")
+    assert salad.unit_cost == 20  # snapshot kept
+    assert summarize(q).status == "missing"  # the stored quote itself is untouched

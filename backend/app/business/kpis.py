@@ -152,8 +152,8 @@ class ProfitReport(BaseModel):
 
 
 def _event_profit(d: Deal, q, vat: float, by_sku: dict) -> EventProfit:
-    from app.services.costing import missing_parts, summarize  # late import
-    s = summarize(q.tier().quote) if q else None
+    from app.services.costing import fill_missing, missing_parts, summarize  # late import
+    s = summarize(fill_missing(q.tier().quote, by_sku)) if q else None
     pkg = None
     if q:
         pkg = next((ln.name_he for ln in q.tier().quote.lines
