@@ -45,8 +45,8 @@ SAMPLES = [
     # name, phone, event_type, days_ahead, guests, meal, kashrut, stage, ready_to_book, source
     ("מיכל לוי", "0501234567", "bar_bat_mitzvah", 19, 120, "meat", "kosher", "quoted", False, "web_chat"),
     ("יוסי כהן", "0529876543", "wedding", 45, 220, "meat", "mehadrin", "quoted", True, "phone"),
-    ("נטע אברהם", "0541112233", "brit", 3, 60, "dairy", "kosher", "won", False, "web_chat"),
-    ("דנה שפירא", "0587654321", "corporate", 3, 180, "meat", "kosher", "won", False, "email"),
+    ("נטע אברהם", "0541112233", "brit", 2, 60, "dairy", "kosher", "won", False, "web_chat"),
+    ("דנה שפירא", "0587654321", "corporate", 2, 180, "meat", "kosher", "won", False, "email"),
     ("Amir Tech Ltd", "0533334444", "conference", 33, 90, "pareve", "kosher", "new", False, "web_chat"),
     ("רונית גל", "0502223344", "birthday", 14, 35, "dairy", None, "new", False, "web_chat"),
     ("אבי מזרחי", "0545556677", "wedding", 80, 300, "meat", "mehadrin", "quoted", False, "referral"),

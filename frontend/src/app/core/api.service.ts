@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -91,6 +91,20 @@ export class ApiService {
     return this.http.post<ImportReport>(this.u(`/catalog/import${apply ? '?apply=true' : ''}`), fd);
   }
   importTemplate(): Observable<Blob> { return this.http.get(this.u('/catalog/import/template'), { responseType: 'blob' }); }
+  suppliers(): Observable<Supplier[]> { return this.http.get<Supplier[]>(this.u('/suppliers')); }
+  putSupplier(s: Supplier): Observable<Supplier> { return this.http.put<Supplier>(this.u(`/suppliers/${encodeURIComponent(s.code)}`), s); }
+  deleteSupplier(code: string): Observable<void> { return this.http.delete<void>(this.u(`/suppliers/${encodeURIComponent(code)}`)); }
+  ingredients(): Observable<Ingredient[]> { return this.http.get<Ingredient[]>(this.u('/ingredients')); }
+  putIngredient(i: Ingredient): Observable<Ingredient> { return this.http.put<Ingredient>(this.u(`/ingredients/${encodeURIComponent(i.code)}`), i); }
+  deleteIngredient(code: string): Observable<void> { return this.http.delete<void>(this.u(`/ingredients/${encodeURIComponent(code)}`)); }
+  purchaseList(start: string, end: string): Observable<PurchaseList> { return this.http.get<PurchaseList>(this.u('/purchasing/list'), { params: { start, end } }); }
+  purchaseXlsx(start: string, end: string): Observable<Blob> { return this.http.get(this.u('/purchasing/list.xlsx'), { params: { start, end }, responseType: 'blob' }); }
+  prepSchedule(start: string, end: string): Observable<PrepDay[]> { return this.http.get<PrepDay[]>(this.u('/production/schedule'), { params: { start, end } }); }
+  purchasingTemplate(): Observable<Blob> { return this.http.get(this.u('/purchasing/import/template'), { responseType: 'blob' }); }
+  importPurchasing(file: File, apply = false): Observable<ImportReport> {
+    const fd = new FormData(); fd.append('file', file);
+    return this.http.post<ImportReport>(this.u(`/purchasing/import${apply ? '?apply=true' : ''}`), fd);
+  }
   quoteMenu(id: string): Observable<OwnerMenu> { return this.http.get<OwnerMenu>(this.u(`/quotes/${id}/menu`)); }
   setQuoteMenu(id: string, pkg: string, choice: Record<string, string[]>): Observable<OwnerMenu> { return this.http.put<OwnerMenu>(this.u(`/quotes/${id}/menu`), { package: pkg, choice }); }
   dealMenu(id: string): Observable<DealMenu> { return this.http.get<DealMenu>(this.u(`/crm/deals/${id}/menu`)); }

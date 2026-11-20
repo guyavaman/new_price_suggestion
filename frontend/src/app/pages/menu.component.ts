@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
 import { CATEGORY, MEAL, UNIT } from '../core/labels';
-import { CatalogItem, ImpactRow, ImportReport, ItemKind, Slot } from '../core/models';
+import { CatalogItem, ImpactRow, ImportReport, Ingredient, ItemKind, RecipeLine, Slot } from '../core/models';
 
 const SOURCE: Record<string, string> = { manual: 'ידני', supplier: 'ספק', recipe: 'מתכון', components: 'מהרכיבים' };
 const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגוריה', unit: 'יחידה', price: 'מחיר', cost: 'עלות', cost_source: 'מקור עלות', meal_type: 'סוג', serves: 'סועדים ליחידה', yield_amount: 'תפוקה ליחידה', slots: 'חלקי החבילה', active: 'פעיל' };
@@ -106,6 +106,7 @@ const KASHRUT_OK: Record<string, string[]> = { meat: ['meat', 'pareve'], dairy: 
           @if (kindCount(k[0])) { <button class="chip" [class.on]="kind() === k[0]" (click)="kind.set(k[0]); cat.set('')">{{ k[1] }} <small>{{ kindCount(k[0]) }}</small></button> }
         }
         <button class="chip miss" [class.on]="onlyMissing()" (click)="onlyMissing.set(!onlyMissing())">חסרים נתונים ({{ missingCount() }})</button>
+        <button class="chip miss" [class.on]="onlyNoRecipe()" (click)="onlyNoRecipe.set(!onlyNoRecipe())">בלי מתכון ({{ noRecipeCount() }})</button>
       </div>
       @if (subCats().length > 1) {
         <div class="chips sub" role="group" aria-label="קטגוריה">
@@ -113,6 +114,43 @@ const KASHRUT_OK: Record<string, string[]> = { meat: ['meat', 'pareve'], dairy: 
         </div>
       }
     </div>
+
+    @if (recipeOf(); as d) {
+      <section class="card slots-ed" aria-labelledby="re-h" id="recipe-editor">
+        <div class="impact-head"><h2 id="re-h">מתכון: {{ d.name_he }}</h2><button class="linkish" (click)="recipeOf.set(null)">סגירה</button></div>
+        <p class="muted small">כמה מכל חומר גלם נכנס ל{{ unitOne[d.unit] || 'יחידה אחת' }} של המנה, ביחידה של חומר הגלם. מנה בלי מתכון לא נכנסת לרשימת הרכש ומסומנת.</p>
+        <table class="rec-t">
+          <thead><tr><th>חומר גלם</th><th>כמות</th><th class="end">עלות</th><th></th></tr></thead>
+          <tbody>
+            @for (l of draftRecipe(); track $index; let li = $index) {
+              <tr>
+                <td>{{ ingName(l.ingredient) }}</td>
+                <td><span class="yin"><input class="money" type="number" min="0" step="any" [ngModel]="l.quantity" (ngModelChange)="setQty(li, $event)" [name]="'rq' + li"
+                       [attr.aria-label]="'כמות ' + ingName(l.ingredient)"><small class="muted">{{ ingUnit(l.ingredient) }}</small></span></td>
+                <td class="end num">{{ lineCost(l) === null ? 'אין מחיר' : (lineCost(l) | ils:2) }}</td>
+                <td><button type="button" class="linkish bad" (click)="removeLine(li)" [attr.aria-label]="'הסרת ' + ingName(l.ingredient)">הסרה</button></td>
+              </tr>
+            }
+          </tbody>
+        </table>
+        <select [ngModel]="''" (ngModelChange)="addLine($event)" name="addIng" aria-label="הוספת חומר גלם">
+          <option value="">+ הוספת חומר גלם</option>
+          @for (g of ingOptions(d); track g.code) { <option [value]="g.code">{{ g.name_he }}</option> }
+        </select>
+        <div class="se-row">
+          <label>תחנת עבודה<input [(ngModel)]="draftStation" name="st" list="stations" maxlength="40" placeholder="למשל קר, חם, גריל"></label>
+          <datalist id="stations">@for (s of stations(); track s) { <option [value]="s"></option> }</datalist>
+          <label class="n">מכינים ימים לפני האירוע<input type="number" min="0" max="14" [(ngModel)]="draftPrep" name="pd"></label>
+        </div>
+        <p class="rsum">עלות חומרי גלם @if (draftCost() !== null) { <b class="num">{{ draftCost() | ils:2 }}</b> } @else { <span class="missing">חסר מחיר לחלק מחומרי הגלם</span> }
+          ל{{ unitOne[d.unit] || 'יחידה' }} · העלות שמוגדרת עכשיו: <b class="num">{{ d.cost | ils:2 }}</b></p>
+        <div class="se-actions">
+          <button type="button" class="btn" [disabled]="busy()" (click)="saveRecipe(d)">שמירת המתכון</button>
+          @if (draftCost() !== null && draftCost() !== d.cost) { <button type="button" class="btn ghost" [disabled]="busy()" (click)="costFromRecipe(d)">עדכון העלות לפי המתכון</button> }
+        </div>
+        @if (slotErr()) { <p class="err" role="alert">{{ slotErr() }}</p> }
+      </section>
+    }
 
     @if (editing(); as pkg) {
       <section class="card slots-ed" aria-labelledby="se-h" id="slot-editor">
@@ -167,6 +205,7 @@ const KASHRUT_OK: Record<string, string[]> = { meat: ['meat', 'pareve'], dairy: 
                     <span class="yin"><input class="money" type="number" min="0" step="any" [value]="i.yield_amount ?? ''" placeholder="לא ידוע" [class.empty]="i.yield_amount == null"
                            (change)="setYield(i, $any($event.target).value)" [attr.aria-label]="'תפוקה ליחידה ' + i.name_he"><small class="muted">{{ i.measure === 'g' ? 'גרם' : 'מנות' }}</small></span>
                   } @else { <a class="muted small" routerLink="/settings">אין כלל כמויות לקטגוריה</a> }
+                  <button class="linkish rec" type="button" [class.warn]="!i.recipe?.length" (click)="editRecipe(i)">{{ i.recipe?.length ? 'מתכון (' + i.recipe!.length + ')' : 'אין מתכון' }}</button>
                 } @else { <span class="muted">—</span> }
               </td>
               <td data-l="מחיר"><input class="money" type="number" min="1" step="0.5" [value]="i.price" (change)="setPrice(i, $any($event.target).value)" [attr.aria-label]="'מחיר ' + i.name_he"></td>
@@ -197,6 +236,11 @@ const KASHRUT_OK: Record<string, string[]> = { meat: ['meat', 'pareve'], dairy: 
     .filters .chips.sub .chip { font-size: .82rem; padding: 2px 10px; }
     .chip small { opacity: .7; margin-inline-start: 3px; }
     .yin { display: inline-flex; gap: 4px; align-items: center; }
+    .yield { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+    .rec { font-size: .8rem; font-weight: 600; } .rec.warn { color: var(--warn); }
+    .rec-t { width: 100%; border-collapse: collapse; max-width: 640px; } .rec-t th { text-align: start; font-size: .76rem; color: var(--muted); padding: 4px 6px; }
+    .rec-t td { padding: 5px 6px; border-top: 1px solid var(--line); } .end { text-align: end; }
+    .rsum { margin: 0; }
     .slots-ed { margin-bottom: 14px; display: grid; gap: 12px; }
     .se-slot { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0; display: grid; gap: 8px; min-width: 0; }
     .se-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
@@ -237,7 +281,10 @@ const KASHRUT_OK: Record<string, string[]> = { meat: ['meat', 'pareve'], dairy: 
 export class MenuComponent {
   private api = inject(ApiService);
   items = signal<CatalogItem[]>([]);
-  q = signal(''); cat = signal(''); kind = signal<ItemKind | ''>(''); onlyMissing = signal(false);
+  q = signal(''); cat = signal(''); kind = signal<ItemKind | ''>(''); onlyMissing = signal(false); onlyNoRecipe = signal(false);
+  ings = signal<Ingredient[]>([]);
+  recipeOf = signal<CatalogItem | null>(null); draftRecipe = signal<RecipeLine[]>([]); draftStation = ''; draftPrep = 0;
+  unitOne: Record<string, string> = { tray: 'מגש אחד', unit: 'יחידה אחת', per_guest: 'מנה אחת', kg: 'ק"ג אחד' };
   kinds = KIND; refGuests = signal(100);
   editing = signal<CatalogItem | null>(null); draftSlots = signal<Slot[]>([]); slotErr = signal('');
   adding = signal(false); importing = signal(false); busy = signal(false);
@@ -254,13 +301,18 @@ export class MenuComponent {
   kindCount = (k: ItemKind) => this.items().filter((i) => i.kind === k).length;
   // missing data: no cost, or (food/drink) no yield per unit
   private lacks = (i: CatalogItem) => i.unit_cost == null || ((i.kind === 'food' || i.kind === 'drink') && !!i.measure && i.yield_amount == null);
+  private dishLike = (i: CatalogItem) => i.kind === 'food' || i.kind === 'drink';
+  noRecipeCount = computed(() => this.items().filter((i) => i.active && this.dishLike(i) && !i.recipe?.length).length);
+  stations = computed(() => [...new Set(this.items().map((i) => i.station).filter((s): s is string => !!s))].sort());
   missingCount = computed(() => this.items().filter((i) => i.active && this.lacks(i)).length);
   shown = computed(() => this.items().filter((i) =>
     (!this.kind() || i.kind === this.kind()) && (!this.cat() || i.category === this.cat())
-    && (!this.q() || i.name_he.includes(this.q())) && (!this.onlyMissing() || this.lacks(i))));
+    && (!this.q() || i.name_he.includes(this.q())) && (!this.onlyMissing() || this.lacks(i))
+    && (!this.onlyNoRecipe() || (this.dishLike(i) && !i.recipe?.length))));
 
   constructor() {
     this.load();
+    this.api.ingredients().subscribe((i) => this.ings.set(i));
     this.api.settings().subscribe((s) => { this.floor.set(s.profit_floor); this.refGuests.set(s.reference_guests ?? 100); });
   }
   load() { this.api.catalog().subscribe((i) => this.items.set(i)); }
@@ -294,6 +346,48 @@ export class MenuComponent {
     });
   }
 
+  // ---- recipes ----
+  private ing = (code: string) => this.ings().find((g) => g.code === code);
+  ingName(code: string) { return this.ing(code)?.name_he ?? code; }
+  ingUnit(code: string) { return ({ kg: 'ק"ג', liter: 'ליטר', unit: "יח'" } as Record<string, string>)[this.ing(code)?.unit ?? ''] ?? ''; }
+  lineCost(l: RecipeLine) { const g = this.ing(l.ingredient); return g?.price == null ? null : g.price * l.quantity; }
+  draftCost = computed(() => {
+    const lines = this.draftRecipe();
+    if (!lines.length) return null;
+    let t = 0;
+    for (const l of lines) { const c = this.lineCost(l); if (c === null) return null; t += c; }
+    return Math.round(t * 100) / 100;
+  });
+  ingOptions(d: CatalogItem) {
+    const ok = KASHRUT_OK[d.meal_type] ?? [];
+    const used = new Set(this.draftRecipe().map((l) => l.ingredient));
+    return this.ings().filter((g) => ok.includes(g.kashrut) && !used.has(g.code));
+  }
+  editRecipe(i: CatalogItem) {
+    this.recipeOf.set(i); this.slotErr.set(''); this.editing.set(null);
+    this.draftRecipe.set(structuredClone(i.recipe ?? [])); this.draftStation = i.station ?? ''; this.draftPrep = i.prep_days ?? 0;
+    setTimeout(() => document.getElementById('recipe-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+  addLine(code: string) { if (code) this.draftRecipe.update((r) => [...r, { ingredient: code, quantity: 1 }]); }
+  removeLine(i: number) { this.draftRecipe.update((r) => r.filter((_, j) => j !== i)); }
+  setQty(i: number, v: number) { this.draftRecipe.update((r) => r.map((l, j) => j === i ? { ...l, quantity: +v } : l)); }
+  saveRecipe(d: CatalogItem) {
+    if (this.draftRecipe().some((l) => !(l.quantity > 0))) { this.slotErr.set('כל כמות חייבת להיות גדולה מאפס'); return; }
+    this.busy.set(true); this.slotErr.set('');
+    this.api.patchItem(d.sku, { recipe: this.draftRecipe(), station: this.draftStation.trim() || null, prep_days: +this.draftPrep || 0 }).subscribe({
+      next: (r) => { this.busy.set(false); this.recipeOf.set(null); this.load(); this.flash(`המתכון של ${r.item.name_he} נשמר`); },
+      error: (e) => { this.busy.set(false); this.slotErr.set(typeof e.error?.detail === 'string' ? e.error.detail : 'השמירה נכשלה'); },
+    });
+  }
+  costFromRecipe(d: CatalogItem) {
+    const cost = this.draftCost();
+    if (cost === null) return;
+    this.api.patchItem(d.sku, { recipe: this.draftRecipe(), cost, cost_source: 'recipe' }).subscribe({
+      next: (r) => { this.recipeOf.set(null); this.load(); this.flash(`העלות של ${r.item.name_he} עודכנה לפי המתכון`); this.impact.set(r.cost_impact); this.impactName.set(r.item.name_he); },
+      error: (e) => this.slotErr.set(typeof e.error?.detail === 'string' ? e.error.detail : 'העדכון נכשל'),
+    });
+  }
+
   // ---- package slots ----
   nameOf(sku: string) { return this.items().find((i) => i.sku === sku)?.name_he ?? sku; }
   eligible(pkg: CatalogItem) {
@@ -302,7 +396,7 @@ export class MenuComponent {
       .sort((a, b) => a.category.localeCompare(b.category) || a.name_he.localeCompare(b.name_he, 'he'));
   }
   editSlots(i: CatalogItem) {
-    this.editing.set(i); this.slotErr.set('');
+    this.editing.set(i); this.slotErr.set(''); this.recipeOf.set(null);
     this.draftSlots.set(structuredClone(i.slots ?? []));
     setTimeout(() => document.getElementById('slot-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }

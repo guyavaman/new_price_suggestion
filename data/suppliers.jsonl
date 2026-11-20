@@ -1,0 +1,6 @@
+{"code": "VEG", "name": "ירקות ופירות השרון", "phone": "050-1111001", "lead_days": 1, "delivery_days": [6, 0, 1, 2, 3, 4], "order_cutoff": "14:00"}
+{"code": "MEAT", "name": "קצביית הגליל", "phone": "050-2222002", "lead_days": 2, "delivery_days": [6, 1, 3], "order_cutoff": "12:00"}
+{"code": "DAIRY", "name": "מחלבת העמק", "phone": "050-3333003", "lead_days": 1, "delivery_days": [6, 0, 1, 2, 3], "order_cutoff": "13:00"}
+{"code": "DRY", "name": "סיטונאות מזון ויבשים", "phone": "050-4444004", "lead_days": 3, "delivery_days": [0, 2], "order_cutoff": "11:00"}
+{"code": "BAKERY", "name": "מאפיית השכונה", "phone": "050-5555005", "lead_days": 1, "delivery_days": [6, 0, 1, 2, 3, 4], "order_cutoff": "16:00"}
+{"code": "FISH", "name": "דגי הים התיכון", "phone": "050-6666006", "lead_days": 2, "delivery_days": [0, 3], "order_cutoff": "10:00"}

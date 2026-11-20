@@ -1,0 +1,51 @@
+{"code": "TOMATO", "name_he": "עגבניות", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 6}
+{"code": "CUCUMBER", "name_he": "מלפפונים", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 5}
+{"code": "ONION", "name_he": "בצל", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 4}
+{"code": "RED-ONION", "name_he": "בצל סגול", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 6}
+{"code": "PARSLEY", "name_he": "פטרוזיליה (צרור)", "unit": "unit", "kashrut": "pareve", "supplier": "VEG", "price": 3}
+{"code": "MINT", "name_he": "נענע (צרור)", "unit": "unit", "kashrut": "pareve", "supplier": "VEG", "price": null}
+{"code": "LEMON", "name_he": "לימונים", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 7}
+{"code": "EGGPLANT", "name_he": "חצילים", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 6}
+{"code": "POTATO", "name_he": "תפוחי אדמה", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 4}
+{"code": "ROOT-VEG", "name_he": "ירקות שורש", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 7}
+{"code": "LETTUCE", "name_he": "חסה", "unit": "unit", "kashrut": "pareve", "supplier": "VEG", "price": 5}
+{"code": "PEPPER", "name_he": "פלפלים", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 8}
+{"code": "GREEN-BEANS", "name_he": "שעועית ירוקה", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 14}
+{"code": "RED-CABBAGE", "name_he": "כרוב סגול", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 5}
+{"code": "BEET", "name_he": "סלק", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 5}
+{"code": "GARLIC", "name_he": "שום", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 25}
+{"code": "ZUCCHINI", "name_he": "קישואים", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 7}
+{"code": "FRUIT", "name_he": "פירות העונה", "unit": "kg", "kashrut": "pareve", "supplier": "VEG", "price": 12}
+{"code": "RICE", "name_he": "אורז", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 9}
+{"code": "BULGUR", "name_he": "בורגול", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 10}
+{"code": "QUINOA", "name_he": "קינואה", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 28}
+{"code": "CHICKPEAS", "name_he": "חומוס יבש", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 12}
+{"code": "TAHINI", "name_he": "טחינה גולמית", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 24}
+{"code": "OLIVE-OIL", "name_he": "שמן זית", "unit": "liter", "kashrut": "pareve", "supplier": "DRY", "price": 38}
+{"code": "OIL", "name_he": "שמן קנולה", "unit": "liter", "kashrut": "pareve", "supplier": "DRY", "price": 10}
+{"code": "ALMONDS", "name_he": "שקדים", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 55}
+{"code": "LENTILS", "name_he": "עדשים", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 11}
+{"code": "COUSCOUS", "name_he": "קוסקוס", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 9}
+{"code": "FLOUR", "name_he": "קמח", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 4}
+{"code": "SUGAR", "name_he": "סוכר", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 5}
+{"code": "CHOCOLATE", "name_he": "שוקולד מריר", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 45}
+{"code": "SPICES", "name_he": "תבלינים", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 60}
+{"code": "PASTA", "name_he": "פסטה", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 8}
+{"code": "TOFU", "name_he": "טופו", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 32}
+{"code": "BREADCRUMBS", "name_he": "פירורי לחם", "unit": "kg", "kashrut": "pareve", "supplier": "DRY", "price": 12}
+{"code": "CHICK-THIGH", "name_he": "פרגיות", "unit": "kg", "kashrut": "meat", "supplier": "MEAT", "price": 42}
+{"code": "CHICK-BREAST", "name_he": "חזה עוף", "unit": "kg", "kashrut": "meat", "supplier": "MEAT", "price": 36}
+{"code": "BEEF-ENTRECOTE", "name_he": "אנטריקוט", "unit": "kg", "kashrut": "meat", "supplier": "MEAT", "price": 140}
+{"code": "MINCED-BEEF", "name_he": "בשר בקר טחון", "unit": "kg", "kashrut": "meat", "supplier": "MEAT", "price": 58}
+{"code": "LAMB-MINCE", "name_he": "בשר טלה טחון", "unit": "kg", "kashrut": "meat", "supplier": "MEAT", "price": 75}
+{"code": "ASADO", "name_he": "אסאדו", "unit": "kg", "kashrut": "meat", "supplier": "MEAT", "price": 85}
+{"code": "CREAM", "name_he": "שמנת מתוקה", "unit": "liter", "kashrut": "dairy", "supplier": "DAIRY", "price": 18}
+{"code": "CHEESE-YELLOW", "name_he": "גבינה צהובה", "unit": "kg", "kashrut": "dairy", "supplier": "DAIRY", "price": 48}
+{"code": "CHEESE-WHITE", "name_he": "גבינה לבנה", "unit": "kg", "kashrut": "dairy", "supplier": "DAIRY", "price": 22}
+{"code": "BUTTER", "name_he": "חמאה", "unit": "kg", "kashrut": "dairy", "supplier": "DAIRY", "price": 40}
+{"code": "FETA", "name_he": "גבינת פטה", "unit": "kg", "kashrut": "dairy", "supplier": "DAIRY", "price": 45}
+{"code": "EGGS", "name_he": "ביצים", "unit": "unit", "kashrut": "pareve", "supplier": "DAIRY", "price": 0.9}
+{"code": "SALMON", "name_he": "פילה סלמון", "unit": "kg", "kashrut": "pareve", "supplier": "FISH", "price": 90}
+{"code": "BREAD-ROLLS", "name_he": "לחמניות", "unit": "unit", "kashrut": "pareve", "supplier": "BAKERY", "price": 1.2}
+{"code": "CHALLAH", "name_he": "חלות", "unit": "unit", "kashrut": "pareve", "supplier": "BAKERY", "price": 7}
+{"code": "HERBS", "name_he": "עשבי תיבול טריים", "unit": "unit", "kashrut": "pareve", "supplier": null, "price": 4}

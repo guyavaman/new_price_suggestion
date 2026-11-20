@@ -89,6 +89,7 @@ const PORTIONED = ['salad', 'starter', 'main', 'side', 'canape', 'breakfast', 'd
           <div class="fields">
             <label>עלות חבילה בתפריט מחושבת ל-(סועדים)<input name="rg" type="number" min="1" max="5000" [(ngModel)]="s.reference_guests"></label>
             <label>הלקוח יכול לבחור מנות עד (ימים לפני האירוע)<input name="ml" type="number" min="0" max="90" [(ngModel)]="s.menu_lock_days"></label>
+            <label>חומרי גלם מגיעים (ימים לפני ההכנה)<input name="db" type="number" min="0" max="7" [(ngModel)]="s.delivery_buffer_days"></label>
           </div>
         </section>
         <section class="card">

@@ -12,6 +12,7 @@ from app.catalog.service import CatalogService
 from app.crm.service import CrmService
 from app.integrations.config import TenantConfig, load_tenant
 from app.integrations.sync import SyncLog, SyncService
+from app.purchasing.service import PurchasingService
 from app.repositories.quotes import JsonQuoteRepository
 from app.schemas.catalog import CatalogItem
 from app.services.corrections import CorrectionStore
@@ -30,6 +31,11 @@ def get_catalog_service() -> CatalogService:
 @lru_cache
 def get_settings_service() -> SettingsService:
     return SettingsService()
+
+
+@lru_cache
+def get_purchasing() -> PurchasingService:
+    return PurchasingService()
 
 
 def get_tenant_id(x_tenant_id: str = Header("demo")) -> str:

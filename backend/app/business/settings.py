@@ -59,6 +59,9 @@ class BusinessSettings(BaseModel):
                                   description="Guest count for a package's cost in the menu")
     menu_lock_days: int = Field(7, ge=0, le=90,
                                 description="Customer can change dishes until N days before")
+    # purchasing
+    delivery_buffer_days: int = Field(1, ge=0, le=7,
+                                      description="Ingredients arrive N days before they're used")
     waiter_ratio: int = Field(15, ge=1, description="one waiter per N guests")
     bartender_ratio: int = Field(75, ge=1)
     head_waiter_from: int = Field(80, ge=1)

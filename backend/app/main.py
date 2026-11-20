@@ -12,6 +12,7 @@ from app.api import agent as agent_api
 from app.api import business as business_api
 from app.api import crm as crm_api
 from app.api import public as public_api
+from app.api import purchasing as purchasing_api
 from app.business.settings import BusinessSettings, SettingsService
 from app.crm.models import ActivityKind, Actor
 from app.crm.service import CrmService
@@ -67,6 +68,7 @@ app.include_router(crm_api.router)
 app.include_router(agent_api.router)
 app.include_router(public_api.router)
 app.include_router(business_api.router)
+app.include_router(purchasing_api.router)
 
 __all__ = ["get_crm", "get_public_tenant", "get_sales_agent", "get_tenant_loader"]
 

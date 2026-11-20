@@ -13,23 +13,31 @@ from app.business.operations import (
     AutomationAction,
     CalendarDay,
     InvoiceError,
-    KitchenSheet,
     TodayView,
     issue_invoice,
-    kitchen_sheet,
     latest_quote,
     month_calendar,
     run_automation,
     today_view,
 )
+from app.business.production import KitchenSheet, kitchen_day, production
 from app.business.settings import BusinessSettings, SettingsService
 from app.catalog.importer import ImportReport, analyze, template_xlsx
 from app.catalog.service import CatalogService, TenantCatalogItem
 from app.crm.models import ActivityKind, Actor, Deal
 from app.crm.service import CrmService
-from app.deps import get_catalog_service, get_crm, get_repo, get_settings_service, get_tenant
+from app.deps import (
+    get_catalog_service,
+    get_crm,
+    get_purchasing,
+    get_repo,
+    get_settings_service,
+    get_tenant,
+)
 from app.integrations.config import TenantConfig
-from app.schemas.catalog import CatalogItem, CostSource, Measure, Slot
+from app.purchasing.recipes import recipe_cost, recipe_errors
+from app.purchasing.service import PurchasingService
+from app.schemas.catalog import CatalogItem, CostSource, Measure, RecipeLine, Slot
 from app.services.cost_impact import ImpactRow, impact_of
 from app.services.costing import default_context, missing_parts, unit_cost
 from app.services.event_menu import PackageMenu, owner_menu
@@ -85,6 +93,9 @@ class ItemPatch(BaseModel):
     cost_source: CostSource | None = None
     yield_amount: float | None = Field(None, gt=0, description="What one unit yields (g/portions)")
     slots: list[Slot] | None = None
+    recipe: list[RecipeLine] | None = None
+    station: str | None = Field(None, max_length=40)
+    prep_days: int | None = Field(None, ge=0, le=14)
 
 
 class CatalogPatchOut(BaseModel):
@@ -99,13 +110,17 @@ class CatalogRow(TenantCatalogItem):
     unit_cost: float | None = None
     cost_missing: list[str] = Field(default_factory=list)
     item_margin: float | None = None  # (price - cost) / price
+    recipe_cost: float | None = None   # one unit's cost from its recipe and ingredient prices
+    recipe_missing: list[str] = Field(default_factory=list)
 
 
 @router.get("/catalog", response_model=list[CatalogRow])
 def list_catalog(t: TenantConfig = Depends(get_tenant),
                  svc: CatalogService = Depends(get_catalog_service),
-                 s: SettingsService = Depends(get_settings_service)):
+                 s: SettingsService = Depends(get_settings_service),
+                 ps: PurchasingService = Depends(get_purchasing)):
     items = svc.all(t.tenant_id)
+    ing = {i.code: i for i in ps.ingredients(t.tenant_id)}
     by_sku = {i.sku: i for i in items}
     rules = s.get(t.tenant_id)
     ctx = default_context(rules)
@@ -115,10 +130,18 @@ def list_catalog(t: TenantConfig = Depends(get_tenant),
         rule = rules.portion_rules.get(i.category.value)
         rows.append(CatalogRow(**i.model_dump(exclude={"kind"}),
                                measure=rule.measure if rule else None, unit_cost=uc,
+                               **_recipe_fields(i, ing),
                                cost_missing=[] if uc is not None else missing_parts(i, by_sku, ctx),
                                item_margin=round((i.price - uc) / i.price, 4)
                                if uc is not None and i.price else None))
     return rows
+
+
+def _recipe_fields(i: CatalogItem, ing: dict) -> dict:
+    if i.kind.value not in ("food", "drink"):
+        return {}
+    cost, missing = recipe_cost(i, ing)
+    return {"recipe_cost": cost, "recipe_missing": missing}
 
 
 @router.post("/catalog", response_model=TenantCatalogItem, status_code=201)
@@ -133,7 +156,8 @@ def add_item(item: CatalogItem, t: TenantConfig = Depends(get_tenant),
 def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
                svc: CatalogService = Depends(get_catalog_service),
                crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
-               s: SettingsService = Depends(get_settings_service)):
+               s: SettingsService = Depends(get_settings_service),
+               ps: PurchasingService = Depends(get_purchasing)):
     patch = body.model_dump(exclude_unset=True)
     if "price" in patch and (patch["price"] is None or patch["price"] <= 0):
         raise HTTPException(422, "Price must be positive")
@@ -150,6 +174,26 @@ def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
             raise HTTPException(422, "; ".join(errs))
         patch["slots"] = [sl.model_dump() for sl in body.slots or []]
         patch["cost_source"] = CostSource.components
+    if "recipe" in patch:
+        if cur.kind.value not in ("food", "drink"):
+            raise HTTPException(422, "מתכון רק למנות אוכל ושתייה")
+        draft = cur.model_copy(update={"recipe": body.recipe or []})
+        errs = recipe_errors(draft, {i.code: i for i in ps.ingredients(t.tenant_id)})
+        if errs:
+            raise HTTPException(422, "; ".join(errs))
+        patch["recipe"] = [r.model_dump() for r in body.recipe or []]
+    if "prep_days" in patch and patch["prep_days"] is None:
+        patch["prep_days"] = 0
+    if "recipe" in patch:
+        if cur.kind.value not in ("food", "drink"):
+            raise HTTPException(422, "מתכון רק למנות אוכל ושתייה")
+        draft = cur.model_copy(update={"recipe": body.recipe or []})
+        errs = recipe_errors(draft, {i.code: i for i in ps.ingredients(t.tenant_id)})
+        if errs:
+            raise HTTPException(422, "; ".join(errs))
+        patch["recipe"] = [r.model_dump() for r in body.recipe or []]
+    if "prep_days" in patch and patch["prep_days"] is None:
+        patch["prep_days"] = 0
     if "cost" in patch:
         if cur.category.value == "package":
             raise HTTPException(422, "עלות של חבילה מחושבת מהמנות שלה ולא מוזנת ידנית")
@@ -248,11 +292,14 @@ def calendar(month: str, t: TenantConfig = Depends(get_tenant),
         raise HTTPException(422, "month must be YYYY-MM") from e
 
 
-@router.get("/kitchen", response_model=KitchenSheet)
+@router.get("/kitchen", response_model=KitchenSheet, tags=["kitchen"])
 def kitchen(day: date, t: TenantConfig = Depends(get_tenant), crm: CrmService = Depends(get_crm),
             repo=Depends(get_repo), svc: CatalogService = Depends(get_catalog_service),
             s: SettingsService = Depends(get_settings_service)):
-    return kitchen_sheet(crm, repo, svc.all(t.tenant_id), t.tenant_id, day, s.get(t.tenant_id))
+    """The day's kitchen: dishes (packages broken down), split by kashrut, grouped by station."""
+    rules = s.get(t.tenant_id)
+    return kitchen_day(production(crm, repo, svc.all(t.tenant_id), rules, t.tenant_id, day, day),
+                       day)
 
 
 class DealMenu(BaseModel):

@@ -11,13 +11,12 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.business import kpis
 from app.business.kpis import Kpis
 from app.business.messages import final_count_text, followup_text
 from app.business.settings import BusinessSettings
-from app.catalog.service import TenantCatalogItem
 from app.crm.models import ActivityKind, Actor, Deal, DealStage, Invoice, now
 from app.crm.service import CrmService, _booked
 from app.repositories.quotes import StatusChange, StoredQuote
@@ -33,101 +32,6 @@ def latest_quote(repo, deal: Deal) -> StoredQuote | None:
         if q:
             return q
     return None
-
-
-# ---------------------------------------------------------------- kitchen
-
-class KitchenItem(BaseModel):
-    sku: str
-    name: str
-    category: str
-    quantity: float
-    unit: str
-    serves: int | None = None
-    events: list[dict] = Field(default_factory=list)  # [{deal_id, title, quantity}]
-    problem: str | None = None  # quantity unknown for some event (e.g. no yield per unit)
-
-
-class KitchenEvent(BaseModel):
-    deal_id: str
-    title: str
-    guests: int | None
-    location: str | None
-    meal_type: str | None
-    dietary: list[str]
-    staff: list[str]
-    equipment: list[str]
-    tier: str | None
-
-
-class KitchenSheet(BaseModel):
-    date: date
-    events: list[KitchenEvent]
-    food: list[KitchenItem]
-    total_guests: int
-    missing_quotes: list[str] = Field(default_factory=list)
-
-
-def kitchen_sheet(crm: CrmService, repo, catalog: list[TenantCatalogItem], tenant: str,
-                  day: date, rules=None) -> KitchenSheet:
-    """What to make on a day. Packages are broken into their chosen dishes and quantities
-    (packages.py), so the kitchen sees "17 trays of Israeli salad", not "180 × package"."""
-    from app.business.settings import BusinessSettings  # late import
-    from app.services.packages import breakdown
-    rules = rules or BusinessSettings(id=tenant, tenant_id=tenant)
-    by_sku = {i.sku: i for i in catalog}
-    deals = sorted(crm.deals.list(tenant, lambda d: d.event_date == day and _booked(d)),
-                   key=lambda d: d.title)
-    food: dict[str, KitchenItem] = {}
-    events, missing = [], []
-    for d in deals:
-        q = latest_quote(repo, d)
-        staff, equipment = [], []
-        if q is None:
-            missing.append(d.title)
-        else:
-            for ln in q.tier().quote.lines:
-                item = by_sku.get(ln.sku)
-                cat = item.category.value if item else "other"
-                if cat in KITCHEN_SKIP:
-                    if cat == "staff":
-                        staff.append(f"{ln.name_he}: {ln.note or ln.quantity}")
-                    continue
-                if cat == "equipment":
-                    equipment.append(f"{ln.name_he} × {ln.quantity:g}")
-                    continue
-                if cat == "package" and item and item.slots:
-                    guests = int(ln.quantity) if item.unit.value == "per_guest" else (
-                        d.final_guest_count or d.guest_count or 0)
-                    b = breakdown(item, by_sku, guests, rules.portion_rules,
-                                  q.menu_choices.get(item.sku))
-                    for r in b.rows:
-                        dish = by_sku.get(r.sku)
-                        k = food.setdefault(r.sku, KitchenItem(
-                            sku=r.sku, name=r.name_he, category=r.category or "other",
-                            quantity=0, unit=UNIT_HE.get(r.unit, r.unit),
-                            serves=dish.serves if dish else None))
-                        k.quantity += r.units or 0
-                        if r.units is None:
-                            k.problem = r.problem
-                        k.events.append({"deal_id": d.id, "title": d.title,
-                                         "quantity": r.units, "package": item.name_he})
-                    continue
-                k = food.setdefault(ln.sku, KitchenItem(
-                    sku=ln.sku, name=ln.name_he, category=cat, quantity=0,
-                    unit=UNIT_HE.get(ln.unit, ln.unit), serves=item.serves if item else None))
-                k.quantity += ln.quantity
-                k.events.append({"deal_id": d.id, "title": d.title, "quantity": ln.quantity})
-        events.append(KitchenEvent(
-            deal_id=d.id, title=d.title, guests=d.final_guest_count or d.guest_count,
-            location=d.location, meal_type=d.meal_type, dietary=d.dietary, staff=staff,
-            equipment=equipment, tier=q.selected_tier if q else None))
-    order = ["package", "starter", "main", "side", "salad", "canape", "breakfast", "dessert",
-             "drink", "bar"]
-    items = sorted(food.values(), key=lambda k: (order.index(k.category)
-                                                 if k.category in order else 99, k.name))
-    return KitchenSheet(date=day, events=events, food=items, missing_quotes=missing,
-                        total_guests=sum(e.guests or 0 for e in events))
 
 
 # ---------------------------------------------------------------- calendar

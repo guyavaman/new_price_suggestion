@@ -8,11 +8,11 @@ from app.business.operations import (
     InvoiceError,
     MorningInvoices,
     issue_invoice,
-    kitchen_sheet,
     month_calendar,
     run_automation,
     today_view,
 )
+from app.business.production import kitchen_day, production
 from app.crm.models import Actor, Deal, DealStage
 from app.deps import (
     get_catalog_service,
@@ -160,16 +160,18 @@ def test_kitchen_sheet_aggregates_won_events(env):
     make_quote(env, guests=70, days=12)  # not approved: not in the kitchen
     for q in (q1, q2):
         env["portal"].accept(q.public_token, "recommended")
-    sheet = kitchen_sheet(env["crm"], env["repo"], env["catalog"].all(T), T,
-                          TODAY + timedelta(days=12))
-    food = {f.sku: f for f in sheet.food}
+    day = TODAY + timedelta(days=12)
+    sheet = kitchen_day(production(env["crm"], env["repo"], env["catalog"].all(T),
+                                   env["settings"].get(T), T, day, day), day)
+    food = {r.sku: r for sec in sheet.sections for g in sec.groups for r in g.rows}
     # the package is broken into its dishes: the kitchen sees the main dish, not the package
     assert "PKG-MEAT-STD" not in food
     pkg = env["catalog"].get(T, "PKG-MEAT-STD")
     main = next(sl for sl in pkg.slots if sl.id == "main").options[0]
-    assert food[main].quantity == 150 and len(food[main].events) == 2
+    assert food[main].units == 150 and len(food[main].events) == 2
     assert sheet.total_guests == 150 and len(sheet.events) == 2
     assert all(e.staff for e in sheet.events) and "STF-WAITER" not in food
+    assert [sec.kashrut for sec in sheet.sections] == ["meat"]
 
 
 def test_calendar_and_today(env):

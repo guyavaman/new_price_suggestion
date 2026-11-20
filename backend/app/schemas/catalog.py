@@ -104,6 +104,13 @@ class DefaultUse(StrEnum):
     premium_extra = "premium_extra"      # added in the premium tier
 
 
+class RecipeLine(BaseModel):
+    """`quantity` of an ingredient (in the ingredient's own unit: kg, liter, unit) for ONE
+    catalog unit of the dish (one tray, one portion, one cake…)."""
+    ingredient: str = Field(..., min_length=1, max_length=40)
+    quantity: float = Field(..., gt=0)
+
+
 class CostSource(StrEnum):
     manual = "manual"
     recipe = "recipe"
@@ -149,6 +156,10 @@ class CatalogItem(BaseModel):
     # E.g. a salad tray = 2000 g, a cake = 16 portions, a per-guest main = 1 portion.
     yield_amount: float | None = Field(None, gt=0)
     slots: list[Slot] = Field(default_factory=list, description="Packages only")
+    # kitchen (stage 3): what goes into one unit, where it's made, how many days ahead
+    recipe: list[RecipeLine] = Field(default_factory=list, description="Empty = no recipe yet")
+    station: str | None = Field(None, max_length=40, description="Work station, e.g. 'קר', 'גריל'")
+    prep_days: int = Field(0, ge=0, le=14, description="Made N days before the event")
 
     @computed_field
     @property

@@ -12,6 +12,7 @@ export const routes: Routes = [
   { path: 'deals/:id', ...page('אירוע', () => import('./pages/deal-detail.component').then((m) => m.DealDetailComponent)) },
   { path: 'calendar', ...page('לוח שנה', () => import('./pages/calendar.component').then((m) => m.CalendarComponent)) },
   { path: 'kitchen', ...page('דף מטבח', () => import('./pages/kitchen.component').then((m) => m.KitchenComponent)) },
+  { path: 'purchasing', ...page('רכש וספקים', () => import('./pages/purchasing.component').then((m) => m.PurchasingComponent)) },
   { path: 'menu', ...page('תפריט ומחירים', () => import('./pages/menu.component').then((m) => m.MenuComponent)) },
   { path: 'settings', ...page('הגדרות', () => import('./pages/settings.component').then((m) => m.SettingsComponent)) },
   { path: 'reports', ...page('דוחות', () => import('./pages/dashboard.component').then((m) => m.DashboardComponent)) },

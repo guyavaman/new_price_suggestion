@@ -174,17 +174,31 @@ export interface TodayView {
   kpis: Kpis;
 }
 export interface CalendarDay { date: string; deals: { id: string; title: string; stage: DealStage; guests: number | null; temperature: Temperature }[]; events_booked: number; guests_booked: number; full: boolean }
-export interface KitchenItem { sku: string; name: string; category: string; quantity: number; unit: string; serves: number | null; problem?: string | null; events: { deal_id: string; title: string; quantity: number | null; package?: string }[] }
+export interface EventInfo { deal_id: string; title: string; event_date: string; guests: number | null; location: string | null; meal_type: string | null; dietary: string[]; staff: string[]; equipment: string[]; tier: string | null }
+export interface KitchenRow { sku: string; name: string; category: string; units: number; unit: string; measure: 'g' | 'unit' | null; total_amount: number | null; problem: string | null; events: { deal_id: string; title: string; units: number | null; package: string | null }[] }
 export interface KitchenSheet {
-  date: string; total_guests: number; missing_quotes: string[]; food: KitchenItem[];
-  events: { deal_id: string; title: string; guests: number | null; location: string | null; meal_type: string | null; dietary: string[]; staff: string[]; equipment: string[]; tier: string | null }[];
+  date: string; total_guests: number; missing_quotes: string[]; warnings: string[]; events: EventInfo[];
+  sections: { kashrut: '' | 'meat' | 'dairy' | 'pareve'; label: string; events: string[]; groups: { station: string; rows: KitchenRow[] }[] }[];
 }
+export interface PrepTask { sku: string; name: string; station: string; units: number | null; unit: string; measure: 'g' | 'unit' | null; total_amount: number | null; deal_id: string; title: string; event_date: string; event_meal: string; days_before: number; problem: string | null }
+export interface PrepDay { date: string; tasks: PrepTask[] }
+export interface PurchaseItem { code: string; name: string; unit: string; quantity: number; price: number | null; cost: number | null; needed_by: string; dishes: string[]; events: string[] }
+export interface OrderBatch { deliver_on: string; order_by: string | null; late: boolean; items: PurchaseItem[]; total: number | null; text: string; whatsapp_url: string | null }
+export interface SupplierOrders { code: string | null; name: string; phone: string; lead_days: number | null; delivery_days: string[]; batches: OrderBatch[]; total: number | null }
+export interface PurchaseList {
+  start: string; end: string; suppliers: SupplierOrders[]; missing_recipes: { sku: string; name: string; events: string[] }[];
+  unknown_ingredients: { code: string; dishes: string[] }[]; missing_quantities: { name: string; problem: string | null; events: string[] }[]; missing_prices: string[];
+}
+export interface Supplier { code: string; name: string; phone: string; email: string; lead_days: number; delivery_days: number[]; order_cutoff: string; notes: string }
+export interface Ingredient { code: string; name_he: string; unit: 'kg' | 'liter' | 'unit'; kashrut: 'meat' | 'dairy' | 'pareve'; supplier: string | null; price: number | null; price_updated_at?: string | null }
+export interface RecipeLine { ingredient: string; quantity: number }
 export interface CatalogItem {
   sku: string; name_he: string; name_en: string; category: string; unit: string; price: number; meal_type: string;
   tags: string[]; serves: number | null; min_qty: number | null; description_he: string; active: boolean;
   // owner-only cost data
   cost?: number | null; cost_updated_at?: string | null; cost_source?: 'manual' | 'recipe' | 'supplier' | 'components' | null;
   kind?: ItemKind; yield_amount?: number | null; slots?: Slot[]; measure?: 'g' | 'unit' | null;
+  recipe?: RecipeLine[]; station?: string | null; prep_days?: number; recipe_cost?: number | null; recipe_missing?: string[];
   unit_cost?: number | null; cost_missing?: string[]; item_margin?: number | null;
 }
 export type ItemKind = 'food' | 'drink' | 'equipment' | 'staff' | 'logistics' | 'package';
@@ -228,7 +242,7 @@ export interface BusinessSettings {
   max_events_per_day: number; max_guests_per_day: number; quote_valid_days: number; deposit_rate: number;
   payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
   invoice_provider: string; service_info: string; profit_floor: number; cost_alert_threshold: number; timezone?: string;
-  portion_rules: Record<string, PortionRule>; reference_guests: number; menu_lock_days: number;
+  portion_rules: Record<string, PortionRule>; reference_guests: number; menu_lock_days: number; delivery_buffer_days: number;
 }
 export interface PublicQuote {
   business_name: string; business_phone: string; business_email?: string; business_id?: string; vat_rate?: number; created_at?: string | null;
