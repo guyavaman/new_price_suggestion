@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hmac
+import os
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.agent.service import ServiceContext
+from app.business.scheduler import tick
 from app.crm.models import ConversationStatus
-from app.deps import get_agent_builder, get_crm, get_portal, get_repo
+from app.deps import get_agent_builder, get_crm, get_portal, get_repo, get_settings_service
 from app.security import AiBudgetExceeded, limit_chat
 from app.services.portal import CustomerPortal, PortalError, PublicQuote
 
@@ -134,3 +138,17 @@ def service_chat(token: str, body: ServiceChatIn, request: Request, repo=Depends
         raise HTTPException(503, "הצ'אט לא זמין כרגע. אפשר להתקשר אלינו.") from e
     return ServiceChatOut(status=r.conversation.status, messages=_visible(r.conversation),
                           reply=r.reply)
+
+
+@router.post("/cron/daily", include_in_schema=False)
+def cron_daily(request: Request, crm=Depends(get_crm), repo=Depends(get_repo),
+               settings=Depends(get_settings_service)) -> dict:
+    """For an external daily scheduler. Needs the CRON_KEY secret in the X-Cron-Key header;
+    without CRON_KEY set on the server the endpoint doesn't exist."""
+    key = os.environ.get("CRON_KEY")
+    if not key:
+        raise HTTPException(404, "Not found")
+    if not hmac.compare_digest(request.headers.get("x-cron-key", ""), key):
+        raise HTTPException(403, "Forbidden")
+    done = tick(crm, repo, settings)
+    return {t: len(a) for t, a in done.items()}

@@ -36,9 +36,16 @@ import { PublicQuote, ServiceChat } from '../core/models';
             <form class="card count" (ngSubmit)="updateCount()">
               <label for="g">מספר אורחים סופי</label>
               <input id="g" name="g" type="number" min="1" [(ngModel)]="guests">
-              <button class="btn" [disabled]="busy() || !guests">עדכון</button>
-              <small class="muted">אפשר לעדכן עד יומיים לפני האירוע. המחיר יתעדכן בהתאם.</small>
+              <button class="btn" [disabled]="busy() || !guests">{{ q.count_needs_approval ? 'שליחת בקשה' : 'עדכון' }}</button>
+              @if (q.count_needs_approval) {
+                <small class="muted">מספר האורחים ננעל ב-{{ q.guest_lock_date | heDate }}. שינוי עכשיו נשלח לאישור שלנו, ותוספת אורחים מתומחרת לפי מדיניות השינויים.</small>
+              } @else {
+                <small class="muted">אפשר לעדכן עד {{ q.guest_lock_date | heDate }}. המחיר יתעדכן בהתאם.</small>
+              }
             </form>
+          }
+          @for (c of q.pending_changes ?? []; track $index) {
+            <p class="note pending" role="status">⏳ הבקשה שלכם נשלחה לאישור: {{ c.summary }}</p>
           }
         } @else if (q.expired) {
           <div class="err">תוקף ההצעה פג ב-{{ q.valid_until | heDate }}. דברו איתנו ונעדכן אותה: {{ q.business_phone }}</div>
@@ -59,7 +66,9 @@ import { PublicQuote, ServiceChat } from '../core/models';
         @if (q.menu?.length) {
           <section class="card dishes" aria-labelledby="dishes-h">
             <h2 id="dishes-h">המנות באירוע</h2>
-            @if (q.menu_lock?.customer_can_choose) {
+            @if (q.menu_lock?.needs_approval) {
+              <p class="muted small">בחירת המנות ננעלה ב-{{ q.menu_lock!.lock_date | heDate }}. אפשר עדיין לבקש שינוי, והוא יישלח לאישור שלנו.</p>
+            } @else if (q.menu_lock?.customer_can_choose) {
               <p class="muted small">אפשר לבחור את המנות@if (q.menu_lock?.lock_date) { עד {{ q.menu_lock!.lock_date | heDate }}}. מה שלא תבחרו, נבחר אנחנו.</p>
             }
             @for (p of q.menu; track p.sku; let first = $first) {
@@ -83,14 +92,14 @@ import { PublicQuote, ServiceChat } from '../core/models';
                 }
                 @if (menuDirty(p.sku)) {
                   <div class="row">
-                    <button class="btn" [disabled]="busy() || !menuReady(p)" (click)="saveDishes(p.sku)">שמירת הבחירה</button>
+                    <button class="btn" [disabled]="busy() || !menuReady(p)" (click)="saveDishes(p.sku)">{{ q.menu_lock?.needs_approval ? 'שליחת בקשה' : 'שמירת הבחירה' }}</button>
                     <button class="btn ghost" type="button" (click)="resetDishes(p.sku)">ביטול</button>
                     @if (!menuReady(p)) { <span class="muted small">צריך לבחור בדיוק את מספר המנות בכל חלק</span> }
                   </div>
                 }
               </details>
             }
-            @if (menuSaved()) { <p class="ok small" role="status">הבחירה נשמרה 👍</p> }
+            @if (menuSaved()) { <p class="ok small" role="status">{{ q.menu_lock?.needs_approval ? 'הבקשה נשלחה לאישור 👍' : 'הבחירה נשמרה 👍' }}</p> }
           </section>
         }
 
@@ -183,6 +192,7 @@ import { PublicQuote, ServiceChat } from '../core/models';
     .dishes .chosen { margin: 0; }
     .dishes .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .ok { color: var(--ok); margin: 0; }
+    .pending { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px 12px; }
     .accept { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; bottom: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
     .big { font-size: 1.05rem; padding: 12px 22px; } .small { font-size: .85rem; }
   `],

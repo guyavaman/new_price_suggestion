@@ -143,9 +143,9 @@ class CrmService:
 
     def add_task(self, tenant: str, title: str, deal_id: str | None = None,
                  due_at: datetime | None = None, priority: str = "normal",
-                 created_by: Actor = Actor.user) -> Task:
+                 created_by: Actor = Actor.user, kind: str | None = None) -> Task:
         t = self.tasks.put(Task(tenant_id=tenant, title=title, deal_id=deal_id, due_at=due_at,
-                                priority=priority, created_by=created_by))
+                                priority=priority, created_by=created_by, kind=kind))
         self.log(tenant, ActivityKind.task, f"משימה: {title}", created_by, deal_id=deal_id)
         return t
 

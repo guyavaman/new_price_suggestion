@@ -459,6 +459,8 @@ def _seed_demo() -> None:
     if os.environ.get("SEED_DEMO") == "1" and not get_crm().deals.list("demo"):
         from scripts.seed_crm import seed
         seed(reset=True)
+    from app.business.scheduler import start_background
+    start_background(get_crm(), get_repo(), get_settings_service())
 
 
 FRONTEND_DIST = Path(os.environ.get(

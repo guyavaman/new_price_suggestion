@@ -22,7 +22,9 @@ from app.schemas.quote import (
 )
 from app.services.costing import default_context, unit_cost
 
-ROLE_HE = {ItemRole.waiter: "מלצר", ItemRole.head_waiter: "מנהל אירוע",
+STYLE_HE = {"buffet": "מזנון", "plated": "הגשה לשולחן", "finger": "פינגר פוד",
+            "chef_station": "שף במקום"}
+ROLE_HE = {ItemRole.waiter: "מלצר", ItemRole.head_waiter: "מנהל אירוע", ItemRole.chef: "שף במקום",
            ItemRole.bartender: "ברמן", ItemRole.supervision: "השגחת מהדרין",
            ItemRole.setup: "הקמה ופירוק", ItemRole.delivery_center: "משלוח מרכז",
            ItemRole.delivery_remote: "משלוח מרוחק"}
@@ -145,12 +147,19 @@ class PricingEngine:
             want_waiters = sv.waiters is True or (
                 sv.waiters is None and guests >= R.auto_waiters_from and has_meal
             )
-            if want_waiters:
-                n = math.ceil(guests / R.waiter_ratio)
+            style = sv.style.value if sv.style else None
+            staffing = R.style_staffing.get(style) if style else None
+            ratio = staffing.waiter_ratio if staffing else R.waiter_ratio
+            if want_waiters or style:
+                n = math.ceil(guests / ratio)
+                how = f" · {STYLE_HE.get(style, style)}" if style else ""
                 add(ItemRole.waiter, n * R.staff_hours,
-                    f"{n} מלצרים × {R.staff_hours} ש' (מלצר לכל {R.waiter_ratio})")
+                    f"{n} מלצרים × {R.staff_hours} ש' · מלצר לכל {ratio}{how}")
                 if guests >= R.head_waiter_from:
                     add(ItemRole.head_waiter, R.staff_hours, f"מנהל אירוע × {R.staff_hours} ש'")
+            if staffing and staffing.chef_ratio:
+                n = math.ceil(guests / staffing.chef_ratio)
+                add(ItemRole.chef, n * R.staff_hours, f"{n} שפים במקום × {R.staff_hours} ש'")
             has_bar = any(self.by_sku[ln.sku].category.value == "bar" for ln in lines)
             bar_staffed = any(self.by_sku[ln.sku].includes_bartender for ln in lines)
             if (sv.bar is True or has_bar) and not bar_staffed:
@@ -168,7 +177,14 @@ class PricingEngine:
             add(ItemRole.delivery_remote if remote else ItemRole.delivery_center, 1,
                 f"ל{req.location}" if req.location else "אזור מרכז (ברירת מחדל)")
 
-        # 4. totals
+        # 4. approved adjustments (late changes): a fixed amount, no cost behind it
+        for a in plan.adjustments:
+            lines.append(QuoteLine(sku=f"ADJ-{a.key}", name_he=a.label, unit="unit",
+                                   unit_price=_r2(a.amount), quantity=1, total=_r2(a.amount),
+                                   note="", source=LineSource.rule, confidence=Confidence.rule,
+                                   unit_cost=0.0, cost_group="food"))
+
+        # 5. totals
         subtotal = _r2(sum(ln.total for ln in lines))
         rate = next((d.rate for d in sorted(R.volume_discounts, key=lambda d: -d.min_subtotal)
                      if subtotal >= d.min_subtotal), 0.0)

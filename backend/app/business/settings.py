@@ -37,6 +37,19 @@ class VolumeDiscount(BaseModel):
     rate: float = Field(..., ge=0, le=0.5)
 
 
+class StyleStaffing(BaseModel):
+    """Staff per serving style: one waiter per `waiter_ratio` guests, and (chef station) one
+    on-site chef per `chef_ratio` guests."""
+    waiter_ratio: int = Field(..., ge=1)
+    chef_ratio: int | None = Field(None, ge=1)
+
+
+def _default_styles() -> dict[str, StyleStaffing]:
+    return {"buffet": StyleStaffing(waiter_ratio=20), "plated": StyleStaffing(waiter_ratio=10),
+            "finger": StyleStaffing(waiter_ratio=25),
+            "chef_station": StyleStaffing(waiter_ratio=15, chef_ratio=80)}
+
+
 class BusinessSettings(BaseModel):
     id: str = Field(..., description="= tenant_id")
     tenant_id: str
@@ -59,10 +72,19 @@ class BusinessSettings(BaseModel):
                                   description="Guest count for a package's cost in the menu")
     menu_lock_days: int = Field(7, ge=0, le=90,
                                 description="Customer can change dishes until N days before")
+    # lock dates and late changes
+    guest_lock_days: int = Field(3, ge=0, le=60,
+                                 description="Guest count locks N days before the event")
+    late_guest_surcharge: float = Field(0.15, ge=0, le=2,
+                                        description="Extra on guests added after the lock")
+    late_decrease_charged: bool = Field(True, description="Fewer guests after the lock are "
+                                                          "still charged for the locked count")
     # purchasing
     delivery_buffer_days: int = Field(1, ge=0, le=7,
                                       description="Ingredients arrive N days before they're used")
-    waiter_ratio: int = Field(15, ge=1, description="one waiter per N guests")
+    waiter_ratio: int = Field(15, ge=1, description="one waiter per N guests (style not set)")
+    style_staffing: dict[str, StyleStaffing] = Field(default_factory=_default_styles,
+                                                     description="per serving style")
     bartender_ratio: int = Field(75, ge=1)
     head_waiter_from: int = Field(80, ge=1)
     auto_waiters_from: int = Field(60, ge=1, description="suggest waiters from N guests")
@@ -90,6 +112,11 @@ class BusinessSettings(BaseModel):
     # automation
     followup_after_days: int = Field(2, ge=1, description="nudge an unanswered quote")
     final_count_days_before: int = Field(5, ge=1, description="ask for the final guest count")
+    balance_reminder_days: int = Field(3, ge=0, le=60, description="remind the balance N days "
+                                                                    "before the event")
+    automation_enabled: bool = Field(True, description="run the reminders every day by itself")
+    automation_hour: int = Field(9, ge=0, le=23, description="local hour of the daily run")
+    automation_last_run: str | None = Field(None, description="date of the last daily run")
     invoice_provider: str = Field("manual", description="manual | morning")
     # customer service: what the agent may answer without asking the owner
     service_info: str = Field(

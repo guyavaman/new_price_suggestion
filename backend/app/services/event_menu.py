@@ -46,8 +46,9 @@ class PublicPackageMenu(BaseModel):
 
 class MenuLock(BaseModel):
     customer_can_choose: bool
-    lock_date: date | None   # last day the customer can change dishes
+    lock_date: date | None   # last day the customer can change dishes without approval
     reason: str | None = None
+    needs_approval: bool = False  # after the lock: a change is a request for the owner
 
 
 def _packages(q: StoredQuote, by_sku: dict[str, CatalogItem], only_selected: bool = False
@@ -93,9 +94,12 @@ def lock(q: StoredQuote, rules: BusinessSettings, today: date, expired: bool) ->
     if q.status not in (QuoteStatus.sent, QuoteStatus.approved) or expired:
         return MenuLock(customer_can_choose=False, lock_date=lock_date,
                         reason="ההצעה לא פתוחה לבחירה")
+    if d and today > d:
+        return MenuLock(customer_can_choose=False, lock_date=lock_date, reason="האירוע עבר")
     if lock_date and today > lock_date:
-        return MenuLock(customer_can_choose=False, lock_date=lock_date,
-                        reason=f"בחירת המנות נסגרה {rules.menu_lock_days} ימים לפני האירוע")
+        return MenuLock(customer_can_choose=True, lock_date=lock_date, needs_approval=True,
+                        reason=f"בחירת המנות ננעלה {rules.menu_lock_days} ימים לפני האירוע: "
+                               "שינוי יישלח לאישור")
     return MenuLock(customer_can_choose=True, lock_date=lock_date)
 
 

@@ -10,7 +10,6 @@ from app.business.operations import (
     issue_invoice,
     month_calendar,
     run_automation,
-    today_view,
 )
 from app.business.production import kitchen_day, production
 from app.crm.models import Actor, Deal, DealStage
@@ -121,10 +120,12 @@ def test_final_guest_count_reprices(env):
     v = env["portal"].update_guest_count(q.public_token, 120)
     d = env["crm"].deals.get(T, deal.id)
     assert v.final_guest_count == 120 and d.guest_count == 120 and d.value > before
-    q_close, _ = make_quote(env, days=1)
+    # inside the lock window the change is a request: nothing changes until the owner approves
+    q_close, d_close = make_quote(env, days=1)
     env["portal"].accept(q_close.public_token, "recommended")
-    with pytest.raises(PortalError):
-        env["portal"].update_guest_count(q_close.public_token, 90)
+    v2 = env["portal"].update_guest_count(q_close.public_token, 90)
+    assert v2.count_needs_approval and v2.pending_changes[0]["kind"] == "guests"
+    assert env["repo"].get(T, q_close.id).request.guest_count == 100
 
 
 # ---------- automation ----------
@@ -184,8 +185,13 @@ def test_calendar_and_today(env):
     assert cell.full and cell.deals[0]["stage"] == "won"
     env["crm"].add_task(T, "להתקשר", deal_id=d.id, due_at=datetime.now(UTC) - timedelta(hours=1),
                         priority="high", created_by=Actor.agent)
-    tv = today_view(env["crm"], T)
-    assert tv.events_this_week[0]["id"] == d.id and tv.tasks_due[0]["title"] == "להתקשר"
+    from app.business.today import today_view
+    from app.purchasing.service import PurchasingService
+    tv = today_view(env["crm"], env["repo"], env["catalog"].all(T), env["settings"].get(T),
+                    PurchasingService(env["tmp"]), T)
+    assert tv.events_this_week[0]["id"] == d.id
+    row = next(r for r in tv.agenda if r.deal_id == d.id)
+    assert row.tasks[0]["title"] == "להתקשר" and row.overdue
 
 
 # ---------- invoices ----------
@@ -457,15 +463,20 @@ def test_customer_picks_dishes_in_the_link_without_seeing_costs(env):
         env["portal"].choose_menu(q.public_token, "PKG-MEAT-STD", {"bread": ["SIDE-BREAD"]})
 
 
-def test_customer_cannot_change_dishes_after_the_lock(env):
+def test_after_the_lock_a_dish_change_waits_for_approval(env):
     env["settings"].update(T, {"menu_lock_days": 7})
-    q, _ = make_quote(env, guests=80, days=5)  # event in 5 days, lock is 7 days before
+    q, deal = make_quote(env, guests=80, days=5)  # event in 5 days, lock is 7 days before
     q = _send(env, q)
     v = env["portal"].view(q.public_token)
-    assert v.menu_lock.customer_can_choose is False and "7 ימים" in v.menu_lock.reason
-    with pytest.raises(PortalError):
-        env["portal"].choose_menu(q.public_token, "PKG-MEAT-STD", {"main": ["MAIN-KEBAB"]})
-    # a draft (not sent yet) isn't open for the customer either
+    assert v.menu_lock.customer_can_choose and v.menu_lock.needs_approval
+    assert "לאישור" in v.menu_lock.reason
+    v2 = env["portal"].choose_menu(q.public_token, "PKG-MEAT-STD", {"main": ["MAIN-KEBAB"]})
+    assert v2.pending_changes and "קבב" in v2.pending_changes[0]["summary"]
+    assert env["repo"].get(T, q.id).menu_choices == {}          # not applied yet
+    d = env["crm"].deals.get(T, deal.id)
+    assert d.change_requests[0].status == "pending"
+    assert any("אחרי הנעילה" in t.title for t in env["crm"].tasks.list(T))
+    # a draft (not sent yet) isn't open for the customer at all
     q2, _ = make_quote(env, guests=80, days=40)
     assert env["portal"].view(q2.public_token).menu_lock.customer_can_choose is False
 

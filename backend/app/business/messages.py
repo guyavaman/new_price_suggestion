@@ -18,7 +18,6 @@ from app.crm.models import Customer, Deal, DealStage
 from app.repositories.quotes import StoredQuote
 from app.schemas.quote import QuoteStatus
 
-FINAL_COUNT_CLOSES_DAYS_BEFORE = 2
 NOA = "יש שאלה? אפשר לכתוב לנועה בעמוד, בכל שעה."
 EVENT_HE = {
     "wedding": "החתונה", "bar_bat_mitzvah": "בר/בת המצווה", "brit": "הברית",
@@ -92,10 +91,15 @@ def customer_messages(deal: Deal, q: StoredQuote | None, customer: Customer | No
                     f"ושם גם מאשרים מספר אורחים סופי: {link}\n{NOA}"))
         if deal.event_date:
             days_left = (deal.event_date - today).days
-            deadline = deal.event_date - timedelta(days=FINAL_COUNT_CLOSES_DAYS_BEFORE)
-            if days_left >= FINAL_COUNT_CLOSES_DAYS_BEFORE and deal.final_guest_count is None:
+            deadline = deal.event_date - timedelta(days=rules.guest_lock_days)
+            if days_left >= 0 and deal.final_guest_count is None:
                 out.append(("final_count", "בקשת מספר אורחים סופי",
-                            final_count_text(link, deadline)))
+                            final_count_text(link, max(deadline, today))))
+            menu_deadline = deal.event_date - timedelta(days=rules.menu_lock_days)
+            if today <= menu_deadline:
+                out.append(("menu", "בקשה לבחור מנות",
+                            f"{hi}, אפשר כבר לבחור את המנות ל{event} 🍽️ עד {_date(menu_deadline)}, "
+                            f"ישר מהעמוד האישי: {link}\n{NOA}"))
             if balance > 0 and days_left >= 0:
                 out.append(("balance", "תזכורת יתרה",
                             f"{hi}, תזכורת קטנה לקראת {event}: נשארה יתרה של {_ils(balance)}. "

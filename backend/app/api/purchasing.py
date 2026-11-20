@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from openpyxl import Workbook
 from openpyxl.styles import Font
+from pydantic import BaseModel, Field
 
 from app.business.production import PrepDay, PurchaseList, prep_schedule, production, purchase_list
 from app.business.settings import SettingsService
@@ -104,7 +105,23 @@ def _purchase(t: TenantConfig, start, end, crm, repo, svc, s, ps) -> PurchaseLis
     catalog = svc.all(t.tenant_id)
     p = production(crm, repo, catalog, rules, t.tenant_id, start, end)
     return purchase_list(p, catalog, ps.ingredients(t.tenant_id), ps.suppliers(t.tenant_id),
-                         rules, start, end)
+                         rules, start, end, ordered=ps.ordered(t.tenant_id))
+
+
+class OrderMarkIn(BaseModel):
+    supplier: str = Field(..., max_length=40)
+    deliver_on: date
+    ordered: bool = True
+
+
+@router.post("/purchasing/orders/mark", status_code=204)
+def mark_order(body: OrderMarkIn, t: TenantConfig = Depends(get_tenant),
+               ps: PurchasingService = Depends(get_purchasing)) -> Response:
+    """The owner placed (or un-placed) the order for this supplier's delivery day."""
+    if body.supplier not in {s.code for s in ps.suppliers(t.tenant_id)}:
+        raise HTTPException(404, "הספק לא נמצא")
+    ps.mark_ordered(t.tenant_id, body.supplier, body.deliver_on, body.ordered)
+    return Response(status_code=204)
 
 
 @router.get("/purchasing/list", response_model=PurchaseList)

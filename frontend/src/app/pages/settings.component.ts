@@ -92,6 +92,32 @@ const PORTIONED = ['salad', 'starter', 'main', 'side', 'canape', 'breakfast', 'd
             <label>חומרי גלם מגיעים (ימים לפני ההכנה)<input name="db" type="number" min="0" max="7" [(ngModel)]="s.delivery_buffer_days"></label>
           </div>
         </section>
+        <section class="card" aria-labelledby="st-h">
+          <h2 id="st-h">סגנון הגשה, נעילה ושינויים מאוחרים</h2>
+          <h3>מלצרים לפי סגנון הגשה</h3>
+          <div class="fields">
+            @for (k of styleKeys; track k[0]) {
+              @if (s.style_staffing[k[0]]; as st) {
+                <label>{{ k[1] }}: מלצר לכל<input [name]="'sw' + k[0]" type="number" min="1" [(ngModel)]="st.waiter_ratio"></label>
+                @if (k[0] === 'chef_station') { <label>שף במקום: אחד לכל (אורחים)<input name="chefr" type="number" min="1" [(ngModel)]="st.chef_ratio"></label> }
+              }
+            }
+            <label>בלי סגנון: מלצר לכל<input name="wr0" type="number" min="1" [(ngModel)]="s.waiter_ratio"></label>
+          </div>
+          <h3>נעילה</h3>
+          <div class="fields">
+            <label>מספר האורחים ננעל (ימים לפני האירוע)<input name="gl" type="number" min="0" max="60" [(ngModel)]="s.guest_lock_days"></label>
+            <label>תוספת על אורחים שנוספו אחרי הנעילה (%)<input name="lgs" type="number" min="0" max="200" [ngModel]="pct(s.late_guest_surcharge)" (ngModelChange)="s.late_guest_surcharge = $event / 100"></label>
+            <label class="chk"><input name="ldc" type="checkbox" [(ngModel)]="s.late_decrease_charged"> הפחתת אורחים אחרי הנעילה: החיוב נשאר לפי הכמות שננעלה</label>
+          </div>
+          <p class="muted">אחרי הנעילה, שינוי של הלקוח בקישור (אורחים או מנות) לא מתבצע מיד: הוא מגיע אליך לאישור במסך "היום".</p>
+          <h3>תזכורות אוטומטיות</h3>
+          <div class="fields">
+            <label class="chk"><input name="ae" type="checkbox" [(ngModel)]="s.automation_enabled"> להריץ תזכורות כל יום</label>
+            <label>בשעה<input name="ah" type="number" min="0" max="23" [(ngModel)]="s.automation_hour"></label>
+            <label>תזכורת יתרה (ימים לפני)<input name="brd" type="number" min="0" max="60" [(ngModel)]="s.balance_reminder_days"></label>
+          </div>
+        </section>
         <section class="card">
           <h2>הצעות, מקדמה ותזכורות</h2>
           <div class="fields">
@@ -135,6 +161,7 @@ const PORTIONED = ['salad', 'starter', 'main', 'side', 'canape', 'breakfast', 'd
     .por input { width: 90px; } .pctin { display: inline-flex; gap: 4px; align-items: center; } .pctin input { width: 64px; }
     .linkish { background: none; border: 0; padding: 0; color: var(--bad); text-decoration: underline; font: inherit; font-size: .85rem; cursor: pointer; }
     .addrule { max-width: 260px; margin-bottom: 10px; }
+    label.chk { display: flex; gap: 8px; align-items: center; color: var(--ink); }
     @media (max-width: 640px) {
       .por thead { display: none; }
       .por tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
@@ -151,6 +178,7 @@ export class SettingsComponent {
   constructor() { this.api.settings().subscribe((s) => this.s.set(structuredClone(s))); }
   pct(v: number) { return Math.round(v * 1000) / 10; }
   catLabel = CATEGORY;
+  styleKeys: [string, string][] = [['buffet', 'מזנון'], ['plated', 'הגשה לשולחן'], ['finger', 'פינגר פוד'], ['chef_station', 'שף במקום']];
   ruleKeys(s: BusinessSettings) { return PORTIONED.filter((k) => s.portion_rules[k]).concat(Object.keys(s.portion_rules).filter((k) => !PORTIONED.includes(k))); }
   missingRules(s: BusinessSettings) { return PORTIONED.filter((k) => !s.portion_rules[k]); }
   addRule(s: BusinessSettings, k: string) { if (k) s.portion_rules = { ...s.portion_rules, [k]: { measure: 'unit', total_per_guest: 1, extra_per_variety: 0.2 } }; }

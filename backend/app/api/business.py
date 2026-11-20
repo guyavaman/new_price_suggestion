@@ -7,24 +7,27 @@ from datetime import UTC, date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 
+from app.business.changes import ChangeError
+from app.business.changes import approve as approve_change
+from app.business.changes import decline as decline_change
 from app.business.kpis import ProfitReport, profit_report
 from app.business.messages import CustomerMessage, customer_messages
 from app.business.operations import (
     AutomationAction,
     CalendarDay,
     InvoiceError,
-    TodayView,
     issue_invoice,
     latest_quote,
     month_calendar,
     run_automation,
-    today_view,
 )
 from app.business.production import KitchenSheet, kitchen_day, production
+from app.business.readiness import MANUAL, Readiness, ReadinessPatch, readiness
 from app.business.settings import BusinessSettings, SettingsService
+from app.business.today import TodayView, today_view
 from app.catalog.importer import ImportReport, analyze, template_xlsx
 from app.catalog.service import CatalogService, TenantCatalogItem
-from app.crm.models import ActivityKind, Actor, Deal
+from app.crm.models import ActivityKind, Actor, Deal, DealStage, SiteConditions
 from app.crm.service import CrmService
 from app.deps import (
     get_catalog_service,
@@ -38,10 +41,13 @@ from app.integrations.config import TenantConfig
 from app.purchasing.recipes import recipe_cost, recipe_errors
 from app.purchasing.service import PurchasingService
 from app.schemas.catalog import CatalogItem, CostSource, Measure, RecipeLine, Slot
+from app.schemas.extraction import ContactInfo, ExtractedRequest
 from app.services.cost_impact import ImpactRow, impact_of
 from app.services.costing import default_context, missing_parts, unit_cost
 from app.services.event_menu import PackageMenu, owner_menu
 from app.services.packages import package_errors
+from app.services.pricing import STYLE_HE, PricingEngine
+from app.services.quotes import create_quote, standard_plan, tiers_for
 
 router = APIRouter(tags=["business"])
 
@@ -57,8 +63,141 @@ def profit(months: int = 6, t: TenantConfig = Depends(get_tenant),
 
 
 @router.get("/crm/today", response_model=TodayView)
-def today(t: TenantConfig = Depends(get_tenant), crm: CrmService = Depends(get_crm)):
-    return today_view(crm, t.tenant_id)
+def today(t: TenantConfig = Depends(get_tenant), crm: CrmService = Depends(get_crm),
+          repo=Depends(get_repo), svc: CatalogService = Depends(get_catalog_service),
+          s: SettingsService = Depends(get_settings_service),
+          ps: PurchasingService = Depends(get_purchasing)):
+    """What could go wrong this week (with one-click actions), then leads and tasks."""
+    return today_view(crm, repo, svc.all(t.tenant_id), s.get(t.tenant_id), ps, t.tenant_id)
+
+
+# ---------- event readiness, late changes, quote from an event ----------
+
+def _deal_or_404(crm: CrmService, tenant: str, deal_id: str) -> Deal:
+    d = crm.deals.get(tenant, deal_id)
+    if d is None:
+        raise HTTPException(404, "Deal not found")
+    return d
+
+
+@router.get("/crm/deals/{deal_id}/readiness", response_model=Readiness, tags=["readiness"])
+def get_readiness(deal_id: str, t: TenantConfig = Depends(get_tenant),
+                  crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                  svc: CatalogService = Depends(get_catalog_service),
+                  s: SettingsService = Depends(get_settings_service)):
+    d = _deal_or_404(crm, t.tenant_id, deal_id)
+    rules = s.get(t.tenant_id)
+    q = latest_quote(repo, d)
+    msgs = customer_messages(d, q, crm.customers.get(t.tenant_id, d.customer_id), rules)
+    return readiness(d, q, svc.all(t.tenant_id), rules, msgs)
+
+
+@router.patch("/crm/deals/{deal_id}/readiness", response_model=Readiness, tags=["readiness"])
+def patch_readiness(deal_id: str, body: ReadinessPatch, t: TenantConfig = Depends(get_tenant),
+                    crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                    svc: CatalogService = Depends(get_catalog_service),
+                    s: SettingsService = Depends(get_settings_service)):
+    """Venue, on-site contact, site conditions and the manual checklist marks."""
+    d = _deal_or_404(crm, t.tenant_id, deal_id)
+    data = body.model_dump(exclude_unset=True)
+    for f in ("location", "site_contact_name", "site_contact_phone"):
+        if f in data:
+            setattr(d, f, (data[f] or "").strip() or None)
+    if data.get("site") is not None:
+        try:
+            d.site = SiteConditions.model_validate({**d.site.model_dump(), **data["site"]})
+        except ValueError as e:
+            raise HTTPException(422, "תנאי שטח לא תקינים") from e
+    if "service_style" in data:  # changes the staff ratio: re-price the quote
+        style = data["service_style"]
+        d.service_style = style.value if style else None
+        q = latest_quote(repo, d)
+        if q is not None:
+            q.request.service.style = style
+            catalog = svc.items(t.tenant_id)
+            q.tiers = tiers_for(q.request, q.plan, catalog, PricingEngine(
+                catalog, rules=s.get(t.tenant_id), choices=q.menu_choices))
+            repo.save(q)
+            d.set_value(q.tier().quote.total, q.tier().quote.net)
+        crm.log(t.tenant_id, ActivityKind.note,
+                f"סגנון הגשה: {STYLE_HE.get(d.service_style, 'לא נקבע')}"
+                + (f". המחיר עודכן ל-₪{d.value:,.0f}" if q is not None else ""),
+                Actor.user, deal_id=d.id)
+    for key, on in (data.get("marks") or {}).items():
+        if key not in MANUAL:
+            raise HTTPException(422, f"סעיף לא מוכר: {key}")
+        if on:
+            d.ready_marks[key] = datetime.now(UTC).isoformat(timespec="minutes")
+            crm.log(t.tenant_id, ActivityKind.note, f"סומן כבוצע: {MANUAL[key]}", Actor.user,
+                    deal_id=d.id)
+        else:
+            d.ready_marks.pop(key, None)
+    crm.save_deal(d)
+    return get_readiness(deal_id, t, crm, repo, svc, s)
+
+
+@router.post("/crm/deals/{deal_id}/changes/{request_id}/{decision}",
+             response_model=Deal, tags=["readiness"])
+def decide_change(deal_id: str, request_id: str, decision: str,
+                  t: TenantConfig = Depends(get_tenant), crm: CrmService = Depends(get_crm),
+                  repo=Depends(get_repo), svc: CatalogService = Depends(get_catalog_service),
+                  s: SettingsService = Depends(get_settings_service)):
+    """Approve or decline a customer's change after the lock. Approval prices it by policy."""
+    d = _deal_or_404(crm, t.tenant_id, deal_id)
+    if decision not in ("approve", "decline"):
+        raise HTTPException(404, "Not found")
+    try:
+        if decision == "approve":
+            q = latest_quote(repo, d)
+            if q is None:
+                raise HTTPException(409, "אין הצעה לאירוע")
+            approve_change(crm, repo, svc.items(t.tenant_id), s.get(t.tenant_id), t.tenant_id,
+                           d, request_id, q)
+        else:
+            decline_change(crm, t.tenant_id, d, request_id)
+    except ChangeError as e:
+        raise HTTPException(e.status, str(e)) from e
+    for task in crm.tasks.list(t.tenant_id, lambda x: x.deal_id == d.id and not x.done
+                               and x.kind == "change_request"):
+        crm.complete_task(t.tenant_id, task.id)
+    return crm.deals.get(t.tenant_id, d.id)
+
+
+class QuoteFromDealOut(BaseModel):
+    quote_id: str
+    number: str
+
+
+@router.post("/crm/deals/{deal_id}/quote", response_model=QuoteFromDealOut, tags=["readiness"])
+def quote_from_deal(deal_id: str, t: TenantConfig = Depends(get_tenant),
+                    crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                    svc: CatalogService = Depends(get_catalog_service),
+                    s: SettingsService = Depends(get_settings_service)):
+    """A lead without a quote: build one from what the event already says (standard menu)."""
+    d = _deal_or_404(crm, t.tenant_id, deal_id)
+    missing = [n for n, v in (("מספר אורחים", d.guest_count), ("בשרי/חלבי", d.meal_type))
+               if not v]
+    if missing:
+        raise HTTPException(422, "כדי לבנות הצעה חסר: " + ", ".join(missing))
+    c = crm.customers.get(t.tenant_id, d.customer_id)
+    rules = s.get(t.tenant_id)
+    catalog = svc.items(t.tenant_id)
+    req = ExtractedRequest(
+        language="he", event_type=d.event_type, guest_count=d.guest_count,
+        event_date=d.event_date, location=d.location, kashrut=d.kashrut, meal_type=d.meal_type,
+        contact=ContactInfo(name=c.name if c else None, phone=c.phone if c else None,
+                            email=c.email if c else None, company=c.company if c else None),
+        service={"style": d.service_style} if d.service_style else {})
+    q = create_quote(repo, t.tenant_id, req, standard_plan(req, catalog), catalog,
+                     PricingEngine(catalog, rules=rules), f"הצעה מתוך האירוע {d.title}")
+    d.quote_ids.append(q.id)
+    d.set_value(q.tier().quote.total, q.tier().quote.net)
+    crm.save_deal(d)
+    if d.stage == DealStage.new:
+        crm.move_stage(t.tenant_id, d.id, DealStage.quoted, Actor.user)
+    crm.log(t.tenant_id, ActivityKind.quote, f"הצעת מחיר {q.number} נוצרה", Actor.user,
+            deal_id=d.id, meta={"quote_id": q.id})
+    return QuoteFromDealOut(quote_id=q.id, number=q.number)
 
 
 # ---------- settings ----------

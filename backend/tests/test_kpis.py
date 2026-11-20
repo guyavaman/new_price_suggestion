@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from app import migrations
 from app.business import kpis
-from app.business.operations import today_view
 from app.business.settings import SettingsService
 from app.crm.models import Deal, DealStage, Payment
 from app.crm.service import CrmService
@@ -62,9 +61,17 @@ def test_today_and_reports_show_the_same_numbers(crm):
     _deal(crm, DealStage.won, 11800, 10000, won_at=datetime(2026, 11, 5, tzinfo=UTC))
     _deal(crm, DealStage.completed, 23600, 20000, won_at=datetime(2026, 11, 6, tzinfo=UTC))
     _deal(crm, DealStage.quoted, 4720, 4000)
-    a = today_view(crm, T, TODAY).kpis
+    from app.business.today import today_view
+    from app.purchasing.service import PurchasingService
+    a = today_view(crm, _Repo(), [], crm.settings.get(T), PurchasingService(crm.deals.path.parent),
+                   T, TODAY).kpis
     b = crm.dashboard(T, TODAY).kpis
     assert a == b
+
+
+class _Repo:
+    def get(self, tenant, qid):
+        return None
 
 
 def test_won_at_is_set_once(crm):

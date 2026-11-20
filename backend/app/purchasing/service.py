@@ -4,8 +4,10 @@ a new business sees the demo lists; its first edit copies them into its own stor
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
+
+from pydantic import BaseModel, Field
 
 from app.purchasing.models import Ingredient, Supplier
 from app.repositories.store import STORE_DIR, Collection
@@ -23,6 +25,15 @@ class TenantIngredient(Ingredient):
     tenant_id: str
 
 
+class OrderMark(BaseModel):
+    """The owner placed the order for a supplier's delivery day."""
+    id: str
+    tenant_id: str
+    supplier: str
+    deliver_on: date
+    ordered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
 def _load(name: str, model):
     path = DATA / name
     if not path.exists():
@@ -36,6 +47,7 @@ class PurchasingService:
         self.sup = Collection(TenantSupplier, base / "suppliers.json")
         self.ing = Collection(TenantIngredient, base / "ingredients.json")
         self.state = base / "purchasing_tenants.json"  # tenants whose lists are their own
+        self.marks = Collection(OrderMark, base / "purchase_orders.json")
 
     # ---- copy-on-write ----
     def _own(self, tenant: str) -> bool:
@@ -90,6 +102,17 @@ class PurchasingService:
         for i in self.ing.list(tenant, lambda x: x.supplier == code):  # keep the ingredients
             self.ing.put(i.model_copy(update={"supplier": None}))
         return self.sup.delete(tenant, f"{tenant}:{code}")
+
+    def ordered(self, tenant: str) -> dict[tuple[str, date], datetime]:
+        return {(m.supplier, m.deliver_on): m.ordered_at for m in self.marks.list(tenant)}
+
+    def mark_ordered(self, tenant: str, supplier: str, deliver_on: date, ordered: bool) -> None:
+        mid = f"{tenant}:{supplier}:{deliver_on.isoformat()}"
+        if ordered:
+            self.marks.put(OrderMark(id=mid, tenant_id=tenant, supplier=supplier,
+                                     deliver_on=deliver_on))
+        else:
+            self.marks.delete(tenant, mid)
 
     def delete_ingredient(self, tenant: str, code: str) -> bool:
         self._materialize(tenant)

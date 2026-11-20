@@ -88,6 +88,27 @@ class Customer(BaseModel):
     updated_at: datetime = Field(default_factory=now)
 
 
+class SiteConditions(BaseModel):
+    """What the venue has. None = not checked yet (the readiness checklist asks for it)."""
+    electricity: bool | None = None
+    kitchenette: bool | None = None
+    fridge: bool | None = None
+    parking: bool | None = None
+    notes: str = Field("", max_length=500)
+
+
+class ChangeRequest(BaseModel):
+    """A change the customer asked for after the lock date: waits for the owner's approval."""
+    id: str = Field(default_factory=_id)
+    kind: str                       # "guests" | "menu"
+    payload: dict                   # guests: {old, new}; menu: {package, choice}
+    summary: str
+    status: str = "pending"         # pending | approved | declined
+    created_at: datetime = Field(default_factory=now)
+    decided_at: datetime | None = None
+    price_note: str | None = None   # what the approval did to the price
+
+
 class Deal(BaseModel):
     id: str = Field(default_factory=_id)
     tenant_id: str
@@ -114,6 +135,14 @@ class Deal(BaseModel):
     payments: list[Payment] = Field(default_factory=list)
     invoice: Invoice | None = None
     automation: dict[str, str] = Field(default_factory=dict, description="rule -> date it ran")
+    # event readiness (stage 4)
+    service_style: str | None = None
+    site_contact_name: str | None = None
+    site_contact_phone: str | None = None
+    site: SiteConditions = Field(default_factory=SiteConditions)
+    ready_marks: dict[str, str] = Field(default_factory=dict,
+                                        description="manual checklist item -> when marked done")
+    change_requests: list[ChangeRequest] = Field(default_factory=list)
     sent_messages: dict[str, str] = Field(default_factory=dict)  # message kind -> date sent
     owner: str | None = None
     lost_reason: str | None = None
@@ -177,6 +206,7 @@ class Task(BaseModel):
     priority: str = "normal"  # high | normal
     created_by: Actor = Actor.user
     created_at: datetime = Field(default_factory=now)
+    kind: str | None = None  # what made it (automation rule, change_request…): de-duplication
 
 
 class ChatRole(StrEnum):

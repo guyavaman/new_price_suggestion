@@ -146,10 +146,34 @@ def m003_package_slots_and_yields(base: Path) -> int:
     return changed
 
 
+def m004_kitchen_fields(base: Path) -> int:
+    """Stages 3–4: tenant menus copied earlier lack recipes, work stations, prep days and the
+    on-site chef role. Fill them from the base catalog by SKU where empty; never overwrite."""
+    from app.catalog.loader import load_catalog  # late import
+    path = base / "catalog.json"
+    items = _read(path)
+    if not items:
+        return 0
+    ref = {i.sku: i.model_dump(mode="json") for i in load_catalog()}
+    changed = 0
+    for it in items.values():
+        src = ref.get(it.get("sku")) or {}
+        touched = False
+        for f in ("recipe", "station", "prep_days", "role"):
+            if not it.get(f) and src.get(f):
+                it[f] = src[f]
+                touched = True
+        changed += touched
+    if changed:
+        _write(path, items)
+    return changed
+
+
 MIGRATIONS: list[tuple[str, Callable[[Path], int]]] = [
     ("001_deal_won_at_and_net_value", m001_deal_won_at_and_net_value),
     ("002_catalog_roles_and_costs", m002_catalog_roles_and_costs),
     ("003_package_slots_and_yields", m003_package_slots_and_yields),
+    ("004_kitchen_fields", m004_kitchen_fields),
 ]
 
 

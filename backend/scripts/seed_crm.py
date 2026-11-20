@@ -11,6 +11,7 @@ import argparse
 import random
 from datetime import date, timedelta
 
+from app.business.changes import request_change
 from app.business.settings import BusinessSettings
 from app.catalog.loader import load_catalog
 from app.crm.models import (
@@ -66,6 +67,20 @@ MENU_CHOICES = {
     "אבי מזרחי": ("PKG-MEAT-STD", {"salads": ["SAL-ISR", "SAL-EGGPLANT", "SAL-CABBAGE"]},
                   "owner"),
 }
+# serving style per event (sets the waiter ratio)
+STYLE = {"דנה שפירא": "buffet", "נטע אברהם": "plated", "יוסי כהן": "plated",
+         "עומר פרץ": "buffet", "מיכל לוי": "buffet"}
+# event readiness: a fully ready event, events with gaps, one without a venue at all
+READY = {
+    "עומר פרץ": {"location": "משרדי החברה, רחוב הברזל 30 תל אביב", "contact": ("שני", "052-7001122"),
+                 "site": dict(electricity=True, kitchenette=True, fridge=True, parking=False),
+                 "final": True, "paid": True, "marks": ["staff", "equipment"], "menu": True},
+    "דנה שפירא": {"location": "גן אירועים השקמה, רעננה", "contact": ("מאיר", "054-3300112"),
+                  "site": dict(electricity=True, kitchenette=True, fridge=None, parking=True),
+                  "final": True, "paid": False, "marks": ["staff"], "menu": False},
+    "נטע אברהם": {"location": None, "contact": None, "site": {}, "final": False, "paid": False,
+                  "marks": [], "menu": False, "change": 72},
+}
 BOOKED_DAYS_AGO = {"נטע אברהם": 2, "דנה שפירא": 9, "עומר פרץ": 40, "גיא שמש": 55}
 
 CHAT = [
@@ -116,7 +131,7 @@ def seed(reset: bool = False) -> None:
                                    event_date=d.event_date, kashrut=kashrut, meal_type=meal,
                                    contact=ContactInfo(name=c.name, phone=c.phone,
                                                        company=c.company),
-                                   service={"waiters": guests >= 60})
+                                   service={"waiters": guests >= 60, "style": STYLE.get(name)})
             q = create_quote(repo, TENANT, req, standard_plan(req, catalog), catalog, engine,
                              f"פנייה של {c.name or c.company} ל{guests} אורחים")
             q.status = QUOTE_STATUS_FOR_STAGE[stage]
@@ -151,6 +166,37 @@ def seed(reset: bool = False) -> None:
             d.won_at = now() - timedelta(days=BOOKED_DAYS_AGO.get(name, 5))
             for p in d.payments:
                 p.paid_at = d.won_at
+            crm.save_deal(d)
+        r = READY.get(name)
+        if r:
+            d = crm.deals.get(TENANT, d.id)
+            d.service_style = STYLE.get(name)
+            d.location = r["location"]
+            if r["contact"]:
+                d.site_contact_name, d.site_contact_phone = r["contact"]
+            d.site = d.site.model_copy(update=r["site"])
+            if r["final"]:
+                d.final_guest_count = d.guest_count
+            for m in r["marks"]:
+                d.ready_marks[m] = now().isoformat(timespec="minutes")
+            if r["paid"]:
+                d.payments.append(Payment(amount=round(d.value - d.deposit_paid, 2),
+                                          status="paid", paid_at=now()))
+            q = repo.get(TENANT, d.quote_ids[0])
+            if r["menu"]:
+                for ln in q.tier().quote.lines:
+                    if ln.sku in by_sku and by_sku[ln.sku].slots:
+                        q.menu_choices[ln.sku] = {s.id: s.options[: s.choose]
+                                                  for s in by_sku[ln.sku].slots}
+                repo.save(q)
+            crm.save_deal(d)
+            if r.get("change"):
+                request_change(crm, TENANT, d, "guests",
+                               {"old": d.guest_count, "new": r["change"]},
+                               f"מספר אורחים {d.guest_count} ← {r['change']}")
+        elif name in STYLE:
+            d = crm.deals.get(TENANT, d.id)
+            d.service_style = STYLE[name]
             crm.save_deal(d)
         if src == "web_chat":
             if i == 0:

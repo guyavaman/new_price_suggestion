@@ -32,12 +32,21 @@ class MenuLine(BaseModel):
     )
 
 
+class Adjustment(BaseModel):
+    """A fixed-amount line the owner approved (e.g. guests added after the lock date). Set by
+    the system from a business policy, never by the LLM. Amount before VAT; may be negative."""
+    key: str = Field(..., max_length=40)
+    label: str = Field(..., max_length=120)
+    amount: float
+
+
 class MenuPlan(BaseModel):
     """What the LLM proposes. Contains SKUs and guest counts — never prices."""
 
     lines: list[MenuLine] = Field(default_factory=list)
     unmatched: list[str] = Field(default_factory=list)
     cover_note: str = ""
+    adjustments: list[Adjustment] = Field(default_factory=list)
 
 
 class QuoteLine(BaseModel):

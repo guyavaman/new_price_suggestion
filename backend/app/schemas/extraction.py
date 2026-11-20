@@ -68,6 +68,13 @@ class Budget(BaseModel):
     scope: BudgetScope = Field(BudgetScope.total)
 
 
+class ServiceStyle(StrEnum):
+    buffet = "buffet"            # מזנון
+    plated = "plated"            # הגשה לשולחן
+    finger = "finger"            # פינגר פוד
+    chef_station = "chef_station"  # שף במקום
+
+
 class ServiceNeeds(BaseModel):
     waiters: bool | None = Field(None, description="True if they ask for waiters/staff.")
     equipment: bool | None = Field(
@@ -75,6 +82,9 @@ class ServiceNeeds(BaseModel):
     )
     delivery: bool | None = Field(None, description="True if they ask for delivery.")
     bar: bool | None = Field(None, description="True if they ask for a bar/bartender.")
+    style: ServiceStyle | None = Field(
+        None, description="How food is served, only if clearly stated: buffet (מזנון), plated "
+        "table service (הגשה לשולחן), finger food, or a chef station on site (שף במקום).")
 
 
 class RequestedItem(BaseModel):

@@ -29,6 +29,8 @@ export interface Deal {
   kashrut: string | null;
   meal_type: string | null;
   dietary: string[];
+  service_style?: string | null; site_contact_name?: string | null; site_contact_phone?: string | null;
+  site?: SiteConditions; ready_marks?: Record<string, string>; change_requests?: ChangeRequest[];
   budget: number | null;
   budget_scope: string | null;
   quote_ids: string[];
@@ -166,13 +168,23 @@ export interface QuoteOut { quote: StoredQuote; sync: { integration_id: string; 
 export interface EditOut extends QuoteOut { reply: string; actions: { tool: string; input: Record<string, unknown>; error: boolean }[]; flags: string[] }
 
 // ---------- owner screens ----------
+export interface UiAction { kind: 'whatsapp' | 'link' | 'edit' | 'mark' | 'approve' | 'quote'; label: string; url: string | null; target: string | null }
+export interface WatchRow { kind: 'readiness' | 'order' | 'change'; key: string; severity: 'high' | 'normal'; deal_id: string | null; title: string; text: string; when: string | null; actions: UiAction[]; meta: Record<string, string> }
+export interface AgendaRow {
+  deal_id: string | null; title: string; value: number | null; stage: string | null; temperature: string | null; event_date: string | null;
+  tasks: { id: string; title: string; due_at: string | null; overdue: boolean; priority: string }[]; overdue: boolean; priority: string; action: UiAction | null;
+}
 export interface TodayView {
+  watch: WatchRow[]; agenda: AgendaRow[];
   waiting_chats: { id: string; deal_id: string | null; escalated: boolean; status: string; reason: string | null; last: string; updated_at: string }[];
-  tasks_due: (Task & { deal_title: string | null })[];
-  events_this_week: { id: string; title: string; stage: DealStage; value: number | null; event_date: string; temperature: Temperature; guests: number | null; deposit_paid: number; final_count_confirmed: boolean }[];
-  hot_leads: { id: string; title: string; stage: DealStage; value: number | null; event_date: string | null; temperature: Temperature }[];
+  events_this_week: { id: string; title: string; event_date: string; guests: number | null; done: number; total: number; ready: boolean }[];
+  reminders: { at: string; deal_id: string | null; text: string; rule: string }[]; automation_last_run: string | null;
   kpis: Kpis;
 }
+export interface ReadyItem { key: string; label: string; ok: boolean; detail: string; action: UiAction | null }
+export interface Readiness { deal_id: string; items: ReadyItem[]; done: number; total: number; ready: boolean; days_left: number | null }
+export interface SiteConditions { electricity: boolean | null; kitchenette: boolean | null; fridge: boolean | null; parking: boolean | null; notes: string }
+export interface ChangeRequest { id: string; kind: 'guests' | 'menu'; payload: Record<string, unknown>; summary: string; status: 'pending' | 'approved' | 'declined'; created_at: string; decided_at: string | null; price_note: string | null }
 export interface CalendarDay { date: string; deals: { id: string; title: string; stage: DealStage; guests: number | null; temperature: Temperature }[]; events_booked: number; guests_booked: number; full: boolean }
 export interface EventInfo { deal_id: string; title: string; event_date: string; guests: number | null; location: string | null; meal_type: string | null; dietary: string[]; staff: string[]; equipment: string[]; tier: string | null }
 export interface KitchenRow { sku: string; name: string; category: string; units: number; unit: string; measure: 'g' | 'unit' | null; total_amount: number | null; problem: string | null; events: { deal_id: string; title: string; units: number | null; package: string | null }[] }
@@ -211,7 +223,7 @@ export interface DishRow {
 }
 export interface Breakdown { sku: string; name_he: string; guests: number; rows: DishRow[]; status: 'complete' | 'missing'; total_cost: number | null; cost_per_guest: number | null; missing: string[] }
 export interface PackageMenu { sku: string; name_he: string; tiers: string[]; guests: number; slots: MenuSlot[]; breakdown: Breakdown }
-export interface MenuLock { customer_can_choose: boolean; lock_date: string | null; reason: string | null }
+export interface MenuLock { customer_can_choose: boolean; lock_date: string | null; reason: string | null; needs_approval?: boolean }
 export interface OwnerMenu { packages: PackageMenu[]; lock: MenuLock }
 export interface DealMenu { quote_id: string | null; quote_number: string | null; tier: string | null; packages: PackageMenu[] }
 export interface ImpactRow {
@@ -243,6 +255,8 @@ export interface BusinessSettings {
   payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
   invoice_provider: string; service_info: string; profit_floor: number; cost_alert_threshold: number; timezone?: string;
   portion_rules: Record<string, PortionRule>; reference_guests: number; menu_lock_days: number; delivery_buffer_days: number;
+  style_staffing: Record<string, { waiter_ratio: number; chef_ratio: number | null }>; guest_lock_days: number; late_guest_surcharge: number; late_decrease_charged: boolean;
+  balance_reminder_days: number; automation_enabled: boolean; automation_hour: number; automation_last_run: string | null;
 }
 export interface PublicQuote {
   business_name: string; business_phone: string; business_email?: string; business_id?: string; vat_rate?: number; created_at?: string | null;
@@ -253,6 +267,7 @@ export interface PublicQuote {
     subtotal?: number; discount_rate?: number; discount?: number; net?: number; vat?: number }[];
   selected_tier: string; valid_until: string; expired: boolean; deposit_rate: number; deposit_paid: number;
   can_accept: boolean; can_update_count: boolean; final_guest_count: number | null;
+  guest_lock_date?: string | null; count_needs_approval?: boolean; pending_changes?: { kind: string; summary: string }[];
   menu?: { sku: string; name_he: string; tiers: string[]; slots: MenuSlot[] }[]; menu_lock?: MenuLock | null;
 }
 

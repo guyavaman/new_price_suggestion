@@ -299,6 +299,7 @@ class OrderBatch(BaseModel):
     total: float | None
     text: str
     whatsapp_url: str | None = None
+    ordered_at: datetime | None = None  # the owner marked it as ordered
 
 
 class SupplierOrders(BaseModel):
@@ -344,7 +345,8 @@ def order_deadline(deliver_on: date, s: Supplier, tz: ZoneInfo) -> datetime:
 
 def purchase_list(p: Production, catalog: list[CatalogItem], ingredients: list[Ingredient],
                   suppliers: list[Supplier], rules: BusinessSettings, start: date, end: date,
-                  now: datetime | None = None) -> PurchaseList:
+                  now: datetime | None = None,
+                  ordered: dict[tuple[str, date], datetime] | None = None) -> PurchaseList:
     tz = ZoneInfo(rules.timezone)
     now = now or datetime.now(tz)
     by_sku = {i.sku: i for i in catalog}
@@ -402,8 +404,10 @@ def purchase_list(p: Production, catalog: list[CatalogItem], ingredients: list[I
             items.sort(key=lambda x: x.name)
             deadline = order_deadline(deliver, s, tz) if s else None
             text = _order_text(rules.business_name, s, deliver, items)
+            done = (ordered or {}).get((scode, deliver)) if scode else None
             bl.append(OrderBatch(
-                deliver_on=deliver, order_by=deadline, late=bool(deadline and deadline < now),
+                deliver_on=deliver, order_by=deadline, ordered_at=done,
+                late=bool(deadline and deadline < now and not done),
                 items=items, total=_sum(x.cost for x in items), text=text,
                 whatsapp_url=whatsapp_url(s.phone, text) if s else None))
         out.append(SupplierOrders(

@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 
 from pydantic import BaseModel
 
+from app.business.changes import guest_lock_date, menu_summary, request_change, set_guests
 from app.business.settings import BusinessSettings, SettingsService
 from app.catalog.service import CatalogService
 from app.crm.models import ActivityKind, Actor, Deal, DealStage, Payment, now
@@ -20,7 +21,6 @@ from app.integrations.sync import SyncService
 from app.payments.providers import get_provider
 from app.repositories.quotes import StatusChange, StoredQuote
 from app.schemas.quote import QuoteStatus
-from app.services.editing import QuoteEditor
 from app.services.event_menu import (
     MenuLock,
     PublicPackageMenu,
@@ -29,10 +29,8 @@ from app.services.event_menu import (
     describe,
     lock,
 )
-from app.services.pricing import PricingEngine
-from app.services.quotes import tiers_for
+from app.services.packages import choice_errors
 
-FINAL_COUNT_CLOSES_DAYS_BEFORE = 2
 HIDDEN_FROM_CUSTOMER = {"staff", "logistics"}
 
 
@@ -82,6 +80,9 @@ class PublicQuote(BaseModel):
     # the dishes in each package; customers may pick where the package allows, until the lock
     menu: list[PublicPackageMenu] = []
     menu_lock: MenuLock | None = None
+    guest_lock_date: date | None = None
+    count_needs_approval: bool = False
+    pending_changes: list[dict] = []  # [{kind, summary}] waiting for the business
 
 
 class CustomerPortal:
@@ -151,7 +152,12 @@ class CustomerPortal:
             deposit_rate=rules.deposit_rate, deposit_paid=deal.deposit_paid if deal else 0,
             can_accept=q.status in (QuoteStatus.draft, QuoteStatus.sent) and not expired,
             can_update_count=bool(q.status == QuoteStatus.approved and event_date
-                                  and (event_date - today).days >= FINAL_COUNT_CLOSES_DAYS_BEFORE),
+                                  and today <= event_date),
+            guest_lock_date=guest_lock_date(event_date, rules),
+            count_needs_approval=bool(event_date and today > guest_lock_date(event_date, rules)),
+            pending_changes=[{"kind": r.kind, "summary": r.summary}
+                             for r in (deal.change_requests if deal else [])
+                             if r.status == "pending"],
             final_guest_count=deal.final_guest_count if deal else None,
             menu=customer_menu(q, by_sku), menu_lock=lock(q, rules, today, expired),
         )
@@ -168,6 +174,19 @@ class CustomerPortal:
         if not lk.customer_can_choose:
             raise PortalError(lk.reason or "לא ניתן לשנות מנות")
         by_sku = {i.sku: i for i in self.catalog.all(q.tenant_id)}
+        if lk.needs_approval:  # after the lock: a request for the owner, nothing changes yet
+            pkg = by_sku.get(package)
+            errs = (choice_errors(pkg, choice, only_customer=True) if pkg
+                    else ["החבילה לא נמצאת בהצעה"])
+            if errs:
+                raise PortalError("; ".join(errs), 422)
+            deal = self._deal(q)
+            if deal is None:
+                raise PortalError("לא נמצא אירוע להצעה")
+            request_change(self.crm, q.tenant_id, deal, "menu",
+                           {"package": package, "choice": choice},
+                           menu_summary(pkg, choice, by_sku))
+            return self.view(token, today)
         errs = apply_choice(q, package, choice, by_sku, rules, by_customer=True)
         if errs:
             raise PortalError("; ".join(errs), 422)
@@ -275,19 +294,25 @@ class CustomerPortal:
     def update_guest_count(self, token: str, guests: int, today: date | None = None) -> PublicQuote:
         v = self.view(token, today)
         if not v.can_update_count:
-            raise PortalError("אפשר לעדכן מספר אורחים רק בהצעה מאושרת ועד יומיים לפני האירוע")
+            raise PortalError("אפשר לעדכן מספר אורחים רק בהצעה מאושרת ועד יום האירוע")
         if not 1 <= guests <= 5000:
             raise PortalError("מספר אורחים לא תקין", 422)
         q = self._quote(token)
         old = q.request.guest_count
-        catalog = self.catalog.items(q.tenant_id)
-        ed = QuoteEditor(q.request, q.plan, catalog)
-        ed.set_guest_count(guests)
-        q.request, q.plan = ed.req, ed.result_plan()
-        engine = PricingEngine(catalog, rules=self._rules(q), choices=q.menu_choices)
-        q.tiers = tiers_for(q.request, q.plan, catalog, engine)
-        self.repo.save(q)
         deal = self._deal(q)
+        if v.count_needs_approval:  # after the lock: the business decides
+            if deal is None:
+                raise PortalError("לא נמצא אירוע להצעה")
+            current = deal.final_guest_count or deal.guest_count or old or 0
+            if guests == current:
+                return v
+            request_change(self.crm, q.tenant_id, deal, "guests",
+                           {"old": current, "new": guests},
+                           f"מספר אורחים {current} ← {guests}")
+            return self.view(token, today)
+        catalog = self.catalog.items(q.tenant_id)
+        q = set_guests(q, guests, catalog, self._rules(q))
+        self.repo.save(q)
         if deal:
             deal.final_guest_count, deal.guest_count = guests, guests
             deal.set_value(q.tier().quote.total, q.tier().quote.net)

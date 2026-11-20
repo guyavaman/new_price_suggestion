@@ -8,13 +8,11 @@ from __future__ import annotations
 import calendar as cal
 import os
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import httpx
 from pydantic import BaseModel
 
-from app.business import kpis
-from app.business.kpis import Kpis
 from app.business.messages import final_count_text, followup_text
 from app.business.settings import BusinessSettings
 from app.crm.models import ActivityKind, Actor, Deal, DealStage, Invoice, now
@@ -88,7 +86,7 @@ def run_automation(crm: CrmService, repo, rules: BusinessSettings, tenant: str,
     def act(d: Deal, rule: str, title: str, text: str, due_hours: int = 4,
             priority: str = "normal") -> None:
         crm.add_task(tenant, title, deal_id=d.id, due_at=now() + timedelta(hours=due_hours),
-                     priority=priority, created_by=Actor.system)
+                     priority=priority, created_by=Actor.system, kind=rule)
         crm.log(tenant, ActivityKind.system, text, Actor.system, deal_id=d.id,
                 meta={"automation": rule})
         d = crm.deals.get(tenant, d.id)
@@ -123,6 +121,11 @@ def run_automation(crm: CrmService, repo, rules: BusinessSettings, tenant: str,
                 msg = final_count_text(link, d.event_date - timedelta(days=2))
                 act(d, "final_count", "לבקש אישור מספר אורחים סופי (הודעה מוכנה בעמוד האירוע)",
                     f"בקשת אישור מספר אורחים: {msg}", due_hours=2)
+            balance = round(max((d.value or 0) - d.deposit_paid, 0), 2)
+            if (0 <= days_left <= rules.balance_reminder_days and balance >= 1
+                    and "balance" not in d.automation):
+                act(d, "balance", f"תזכורת יתרה ₪{balance:,.0f} (הודעה מוכנה בעמוד האירוע)",
+                    f"תזכורת יתרה ללקוח: נשארו ₪{balance:,.0f}", due_hours=4)
             if days_left < 0 and "completed" not in d.automation:
                 crm.move_stage(tenant, d.id, DealStage.completed, Actor.system)
                 if d.invoice is None:
@@ -208,51 +211,3 @@ def issue_invoice(crm: CrmService, repo, rules: BusinessSettings, tenant: str, d
             f"חשבונית {deal.invoice.number} הופקה (₪{deal.invoice.amount:,.0f})", Actor.user,
             deal_id=deal.id)
     return deal
-
-
-# ---------------------------------------------------------------- today
-
-class TodayView(BaseModel):
-    waiting_chats: list[dict]
-    tasks_due: list[dict]
-    events_this_week: list[dict]
-    hot_leads: list[dict]
-    kpis: Kpis  # the same numbers as the reports screen, from one place
-
-
-def today_view(crm: CrmService, tenant: str, today: date | None = None) -> TodayView:
-    today = today or date.today()
-    end_of_day = datetime.combine(today, datetime.max.time()).astimezone()
-    deals = crm.deals.list(tenant)
-    convs = crm.conversations.list(tenant, lambda c: c.status in ("handed_off", "human"))
-    waiting = sorted(convs, key=lambda c: (not c.escalated, c.updated_at))
-    tasks = [t for t in crm.tasks.list(tenant, lambda t: not t.done)
-             if t.due_at is None or t.due_at <= end_of_day]
-    tasks.sort(key=lambda t: (t.priority != "high", t.due_at or end_of_day))
-    by_id = {d.id: d for d in deals}
-    week = sorted([d for d in deals if d.stage == DealStage.won and d.event_date
-                   and today <= d.event_date <= today + timedelta(days=7)],
-                  key=lambda d: d.event_date)
-    hot = sorted([d for d in deals if d.stage in (DealStage.new, DealStage.quoted)
-                  and d.temperature == "hot"], key=lambda d: -d.lead_score)
-
-    def card(d: Deal) -> dict:
-        return {"id": d.id, "title": d.title, "stage": d.stage.value, "value": d.value,
-                "event_date": d.event_date, "temperature": d.temperature.value}
-
-    return TodayView(
-        waiting_chats=[{"id": c.id, "deal_id": c.deal_id, "escalated": c.escalated,
-                        "status": c.status.value, "reason": c.handoff_reason,
-                        "last": next((m.text for m in reversed(c.messages)
-                                      if m.role == "user"), ""), "updated_at": c.updated_at}
-                       for c in waiting],
-        tasks_due=[{**t.model_dump(mode="json"),
-                    "deal_title": by_id[t.deal_id].title if t.deal_id in by_id else None}
-                   for t in tasks[:20]],
-        events_this_week=[{**card(d), "guests": d.final_guest_count or d.guest_count,
-                           "deposit_paid": d.deposit_paid,
-                           "final_count_confirmed": d.final_guest_count is not None}
-                          for d in week],
-        hot_leads=[card(d) for d in hot[:8]],
-        kpis=kpis.compute(crm, tenant, crm.settings.get(tenant), today),
-    )

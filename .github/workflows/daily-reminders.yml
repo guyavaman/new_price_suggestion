@@ -1,0 +1,23 @@
+name: Daily reminders
+
+# Wakes the server every morning and runs the daily reminders (final guest count, balance,
+# quote follow-ups). The server also runs them by itself while it's up; this covers the free
+# Render instance sleeping. Needs two repository secrets: APP_URL and CRON_KEY (the same value
+# as the CRON_KEY environment variable on Render). Without them the job does nothing.
+on:
+  schedule:
+    - cron: "17 6 * * *"   # 08:17 Israel winter time / 09:17 summer
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run reminders
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_KEY: ${{ secrets.CRON_KEY }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_KEY" ]; then echo "APP_URL/CRON_KEY not set: skipping"; exit 0; fi
+          curl -fsS --retry 3 --retry-delay 30 --max-time 120 -X POST \
+            -H "X-Cron-Key: $CRON_KEY" "$APP_URL/public/cron/daily"

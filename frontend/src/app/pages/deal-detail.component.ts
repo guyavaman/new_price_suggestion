@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe, RelativePipe } from '../core/format';
 import { ACTOR, EVENT_TYPE, KASHRUT, MEAL, QUOTE_STATUS, REJECT_REASONS, SOURCE, STAGES, TEMP, dietLabel } from '../core/labels';
-import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu } from '../core/models';
+import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Readiness } from '../core/models';
 
 @Component({
   selector: 'app-deal-detail',
@@ -54,6 +54,64 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu } fr
             @if (x.deal.dietary.length) { <div><span>תזונה</span><b>{{ diets(x.deal.dietary) }}</b></div> }
             @if (x.deal.budget) { <div><span>תקציב</span><b class="num">{{ x.deal.budget | ils }} {{ x.deal.budget_scope === 'per_guest' ? 'לאורח' : '' }}</b></div> }
           </section>
+
+          @if (rd(); as r) {
+            <section class="card ready" id="readiness" aria-labelledby="rd-h">
+              <div class="h"><h2 id="rd-h">מוכנות לאירוע</h2>
+                <span class="rmeter" [attr.aria-label]="r.done + ' מתוך ' + r.total"><i [style.width.%]="r.done / r.total * 100"></i></span>
+                <b class="num" [class.okc]="r.ready">{{ r.done }}/{{ r.total }}{{ r.ready ? ' · מוכן ✓' : '' }}</b></div>
+
+              <label class="style">סגנון הגשה
+                <select (change)="setStyle($any($event.target).value)" aria-describedby="style-n">
+                  <option value="" [selected]="!x.deal.service_style">לא נקבע</option>@for (s of styles; track s[0]) { <option [value]="s[0]" [selected]="x.deal.service_style === s[0]">{{ s[1] }}</option> }
+                </select>
+                <small id="style-n" class="muted">קובע את יחס המלצרים (בהגדרות) ומעדכן את המחיר</small></label>
+
+              @for (c of pendingChanges(); track c.id) {
+                <div class="chg" role="alert"><b>הלקוח ביקש אחרי הנעילה:</b> {{ c.summary }}
+                  <span class="acts"><button class="btn sm" (click)="decide(c.id, 'approve')">אישור</button><button class="btn ghost sm" (click)="decide(c.id, 'decline')">דחייה</button></span>
+                  <small class="muted">באישור, המחיר מחושב לפי מדיניות השינויים בהגדרות</small></div>
+              }
+
+              <ul class="checks">
+                @for (i of r.items; track i.key) {
+                  <li [class.ok]="i.ok">
+                    <span class="mark" aria-hidden="true">{{ i.ok ? '✓' : '✗' }}</span>
+                    <span><b>{{ i.label }}</b><small class="muted"> · {{ i.detail }}</small></span>
+                    @if (i.action; as a) {
+                      @switch (a.kind) {
+                        @case ('whatsapp') { <a class="btn sm" [href]="a.url" target="_blank" rel="noopener">{{ a.label }}</a> }
+                        @case ('link') { <a class="btn ghost sm" [routerLink]="a.url">{{ a.label }}</a> }
+                        @case ('mark') { <button class="btn ghost sm" type="button" (click)="markReady(a.target!, true)">{{ a.label }}</button> }
+                        @case ('edit') { <button class="btn ghost sm" type="button" (click)="siteOpen.set(true)">{{ a.label }}</button> }
+                      }
+                    } @else if (i.key === 'staff' || i.key === 'equipment') {
+                      @if (i.ok && i.detail !== 'אין ציוד בהזמנה') { <button class="linkish" type="button" (click)="markReady(i.key, false)">ביטול הסימון</button> }
+                    }
+                  </li>
+                }
+              </ul>
+
+              <button class="linkish" type="button" (click)="siteOpen.set(!siteOpen())">{{ siteOpen() ? 'סגירת פרטי המקום' : 'פרטי המקום ותנאי שטח' }}</button>
+              @if (siteOpen()) {
+                <form class="site" (ngSubmit)="saveSite()">
+                  <label>כתובת המקום<input name="loc" [(ngModel)]="siteForm.location" maxlength="200"></label>
+                  <label>איש קשר במקום<input name="scn" [(ngModel)]="siteForm.site_contact_name" maxlength="80"></label>
+                  <label>טלפון במקום<input name="scp" [(ngModel)]="siteForm.site_contact_phone" inputmode="tel" maxlength="30"></label>
+                  <div class="conds">
+                    @for (k of siteKeys; track k[0]) {
+                      <fieldset><legend>{{ k[1] }}</legend>
+                        @for (o of tri; track o[1]) {
+                          <label class="tri"><input type="radio" [name]="'c' + k[0]" [checked]="siteForm.site[k[0]] === o[0]" (change)="siteForm.site[k[0]] = o[0]"> {{ o[1] }}</label>
+                        }
+                      </fieldset>
+                    }
+                  </div>
+                  <button class="btn">שמירה</button>
+                </form>
+              }
+            </section>
+          }
 
           <section class="card">
             <div class="h"><h2>הצעת מחיר ותשלום</h2>
@@ -180,6 +238,25 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu } fr
     }
   `,
   styles: [`
+    .ready { display: grid; gap: 10px; }
+    .linkish { background: none; border: 0; padding: 0; color: var(--olive); text-decoration: underline; font: inherit; font-weight: 600; cursor: pointer; justify-self: start; }
+    .ready .h { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .rmeter { flex: 1 1 80px; max-width: 160px; height: 8px; border-radius: 99px; background: var(--paper); overflow: hidden; } .rmeter i { display: block; height: 100%; background: var(--ok); }
+    .okc { color: var(--ok); }
+    .style { display: grid; gap: 3px; font-size: .88rem; color: var(--muted); max-width: 320px; } .style select { color: var(--ink); }
+    .chg { background: var(--warn-soft); border-radius: 8px; padding: 8px 10px; display: grid; gap: 6px; } .chg .acts { display: flex; gap: 6px; }
+    .checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .checks li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border-radius: 8px; background: var(--bad-soft); }
+    .checks li.ok { background: var(--ok-soft); }
+    .checks li > span:nth-child(2) { flex: 1 1 220px; }
+    .checks .mark { font-weight: 800; width: 1.2em; text-align: center; color: var(--bad); } .checks li.ok .mark { color: var(--ok); }
+    .btn.sm { padding: 4px 10px; font-size: .84rem; text-decoration: none; }
+    .site { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+    .site label { display: grid; gap: 3px; font-size: .85rem; color: var(--muted); } .site input { color: var(--ink); }
+    .conds { grid-column: 1 / -1; display: flex; gap: 10px; flex-wrap: wrap; }
+    .conds fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px 8px; } .conds legend { font-size: .85rem; font-weight: 600; }
+    .tri { display: inline-flex !important; gap: 4px; align-items: center; margin-inline-end: 8px; color: var(--ink) !important; }
+    .site .btn { justify-self: start; }
     .back { display: inline-block; margin-bottom: 10px; text-decoration: none; }
     .page-head p { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
     .stages { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -268,9 +345,33 @@ export class DealDetailComponent {
     });
   }
 
+  rd = signal<Readiness | null>(null);
+  siteOpen = signal(false);
+  styles: [string, string][] = [['buffet', 'מזנון'], ['plated', 'הגשה לשולחן'], ['finger', 'פינגר פוד'], ['chef_station', 'שף במקום']];
+  siteKeys: ['electricity' | 'kitchenette' | 'fridge' | 'parking', string][] = [['electricity', 'חשמל'], ['kitchenette', 'מטבחון'], ['fridge', 'מקרר'], ['parking', 'חניה']];
+  tri: [boolean | null, string][] = [[true, 'יש'], [false, 'אין'], [null, 'לא נבדק']];
+  siteForm = { location: '', site_contact_name: '', site_contact_phone: '', site: { electricity: null, kitchenette: null, fridge: null, parking: null } as Record<string, boolean | null> };
+  pendingChanges = computed(() => (this.x()?.deal.change_requests ?? []).filter((c) => c.status === 'pending'));
+  private fillSite() {
+    const d = this.x()?.deal;
+    if (!d) return;
+    this.siteForm = { location: d.location ?? '', site_contact_name: d.site_contact_name ?? '', site_contact_phone: d.site_contact_phone ?? '',
+      site: { electricity: d.site?.electricity ?? null, kitchenette: d.site?.kitchenette ?? null, fridge: d.site?.fridge ?? null, parking: d.site?.parking ?? null } };
+  }
+  saveSite() {
+    this.api.patchReadiness(this.id(), { location: this.siteForm.location, site_contact_name: this.siteForm.site_contact_name,
+      site_contact_phone: this.siteForm.site_contact_phone, site: this.siteForm.site }).subscribe(() => { this.siteOpen.set(false); this.load(); });
+  }
+  markReady(key: string, on: boolean) { this.api.patchReadiness(this.id(), { marks: { [key]: on } }).subscribe(() => this.load()); }
+  setStyle(style: string) { this.api.patchReadiness(this.id(), { service_style: style || null }).subscribe(() => this.load()); }
+  decide(rid: string, d: 'approve' | 'decline') {
+    this.api.decideChange(this.id(), rid, d).subscribe({ next: () => this.load(), error: (e) => this.error.set(e.error?.detail ?? 'הפעולה נכשלה') });
+  }
+
   load(id = this.id()) {
+    this.api.readiness(id).subscribe({ next: (r) => this.rd.set(r), error: () => this.rd.set(null) });
     this.api.dealMenu(id).subscribe({ next: (m) => this.menu.set(m), error: () => this.menu.set(null) });
-    this.api.deal(id).subscribe({ next: (x) => this.x.set(x), error: () => this.error.set('האירוע לא נמצא או שהשרת לא זמין') });
+    this.api.deal(id).subscribe({ next: (x) => { this.x.set(x); this.fillSite(); }, error: () => this.error.set('האירוע לא נמצא או שהשרת לא זמין') });
     this.api.dealMessages(id).subscribe((ms) => {
       this.messages.set(ms);
       const keep = ms.find((m) => m.kind === this.pickedKind());

@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -105,6 +105,13 @@ export class ApiService {
     const fd = new FormData(); fd.append('file', file);
     return this.http.post<ImportReport>(this.u(`/purchasing/import${apply ? '?apply=true' : ''}`), fd);
   }
+  readiness(dealId: string): Observable<Readiness> { return this.http.get<Readiness>(this.u(`/crm/deals/${dealId}/readiness`)); }
+  patchReadiness(dealId: string, body: Partial<{ location: string; site_contact_name: string; site_contact_phone: string; site: Partial<SiteConditions>; marks: Record<string, boolean>; service_style: string | null }>): Observable<Readiness> {
+    return this.http.patch<Readiness>(this.u(`/crm/deals/${dealId}/readiness`), body);
+  }
+  decideChange(dealId: string, requestId: string, decision: 'approve' | 'decline'): Observable<unknown> { return this.http.post(this.u(`/crm/deals/${dealId}/changes/${requestId}/${decision}`), {}); }
+  quoteFromDeal(dealId: string): Observable<{ quote_id: string; number: string }> { return this.http.post<{ quote_id: string; number: string }>(this.u(`/crm/deals/${dealId}/quote`), {}); }
+  markOrder(supplier: string, deliver_on: string, ordered = true): Observable<void> { return this.http.post<void>(this.u('/purchasing/orders/mark'), { supplier, deliver_on, ordered }); }
   quoteMenu(id: string): Observable<OwnerMenu> { return this.http.get<OwnerMenu>(this.u(`/quotes/${id}/menu`)); }
   setQuoteMenu(id: string, pkg: string, choice: Record<string, string[]>): Observable<OwnerMenu> { return this.http.put<OwnerMenu>(this.u(`/quotes/${id}/menu`), { package: pkg, choice }); }
   dealMenu(id: string): Observable<DealMenu> { return this.http.get<DealMenu>(this.u(`/crm/deals/${id}/menu`)); }

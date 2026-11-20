@@ -88,6 +88,7 @@ class ItemRole(StrEnum):
     says which of its items plays each role; nothing in code knows any item by name or SKU."""
     waiter = "waiter"
     head_waiter = "head_waiter"
+    chef = "chef"                        # on-site chef (chef-station service)
     bartender = "bartender"
     supervision = "supervision"          # mehadrin kashrut supervision, per guest
     setup = "setup"                      # equipment setup and collection
