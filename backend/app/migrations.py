@@ -103,9 +103,53 @@ def m002_catalog_roles_and_costs(base: Path) -> int:
     return changed
 
 
+CATEGORY_LABEL = {"salad": "סלטים", "starter": "ראשונות", "main": "עיקריות", "side": "תוספות",
+                  "canape": "קבלת פנים", "breakfast": "מאפים ובוקר", "dessert": "קינוחים",
+                  "drink": "שתייה", "bar": "בר"}
+
+
+def m003_package_slots_and_yields(base: Path) -> int:
+    """Stage 2: packages become slots ("3 salads out of…") and food items get a yield per unit.
+    Fill `yield_amount` and `slots` from the base catalog by SKU where missing. A package the
+    business built itself from stage-1 components becomes one fixed slot per category (the same
+    dishes, nothing lost); the old components are then cleared."""
+    from app.catalog.loader import load_catalog  # late import
+    path = base / "catalog.json"
+    items = _read(path)
+    if not items:
+        return 0
+    ref = {i.sku: i.model_dump(mode="json") for i in load_catalog()}
+    cat_of = {it.get("sku"): it.get("category") for it in items.values()}
+    changed = 0
+    for it in items.values():
+        src = ref.get(it.get("sku")) or {}
+        touched = False
+        for f in ("yield_amount", "slots"):
+            if not it.get(f) and src.get(f):
+                it[f] = src[f]
+                touched = True
+        comps = it.get("components") or []
+        if comps and not it.get("slots"):
+            groups: dict[str, list[str]] = {}
+            for c in comps:
+                groups.setdefault(cat_of.get(c["sku"]) or "other", []).append(c["sku"])
+            it["slots"] = [{"id": cat, "label_he": CATEGORY_LABEL.get(cat, "מנות"),
+                            "choose": len(skus), "options": skus, "customer_choice": False}
+                           for cat, skus in groups.items()]
+            touched = True
+        if comps and it.get("slots"):
+            it["components"] = []
+            touched = True
+        changed += touched
+    if changed:
+        _write(path, items)
+    return changed
+
+
 MIGRATIONS: list[tuple[str, Callable[[Path], int]]] = [
     ("001_deal_won_at_and_net_value", m001_deal_won_at_and_net_value),
     ("002_catalog_roles_and_costs", m002_catalog_roles_and_costs),
+    ("003_package_slots_and_yields", m003_package_slots_and_yields),
 ]
 
 

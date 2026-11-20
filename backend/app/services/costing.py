@@ -4,7 +4,7 @@ Rules
 - Cost is per catalog unit, before VAT. `None` means unknown, and unknown is a normal state:
   a quote with any unknown cost has status "missing" and **no** profit figure (never a fake
   100% or 0%), plus the list of what's missing.
-- A package's cost is computed from its components; a typed-in package cost is ignored.
+- A package's cost is computed from its dishes (packages.py); a typed-in package cost is ignored.
 - Gross profit = revenue before VAT, after discount (quote.net) − direct costs.
 - Quote lines carry a cost snapshot (`unit_cost`) taken when they were priced. Summaries use
   the snapshot; the cost-change alert compares it with today's catalog.
@@ -15,7 +15,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from app.schemas.catalog import CatalogItem, CostGroup
+from app.business.settings import BusinessSettings
+from app.schemas.catalog import CatalogItem, CostGroup, PortionRule
+from app.services.packages import breakdown
 
 GROUP_HE = {"food": "אוכל ושתייה", "staff": "צוות", "equipment": "ציוד", "logistics": "לוגיסטיקה"}
 
@@ -24,41 +26,50 @@ def _r2(x: float) -> float:
     return round(x + 1e-9, 2)
 
 
+class CostContext(BaseModel):
+    """What a package's cost depends on: the business's portion rules, how many guests the
+    package is for (trays round up) and which dishes were chosen."""
+    rules: dict[str, PortionRule]
+    guests: int
+    choice: dict[str, list[str]] | None = None
+
+
+def default_context(rules: BusinessSettings | None = None, guests: int | None = None,
+                    choice: dict | None = None) -> CostContext:
+    rules = rules or BusinessSettings(id="default", tenant_id="default")
+    return CostContext(rules=rules.portion_rules, guests=guests or rules.reference_guests,
+                       choice=choice)
+
+
 def unit_cost(item: CatalogItem, by_sku: dict[str, CatalogItem],
-              _seen: frozenset[str] = frozenset()) -> float | None:
-    """Cost of one catalog unit. Packages: sum of component costs per guest."""
-    if item.components:
-        if item.sku in _seen:  # a package containing itself: refuse rather than loop
-            return None
-        total = 0.0
-        for c in item.components:
-            part = by_sku.get(c.sku)
-            if part is None:
-                return None
-            pc = unit_cost(part, by_sku, _seen | {item.sku})
-            if pc is None:
-                return None
-            total += pc * c.quantity / c.per_guests
-        return _r2(total)
+              ctx: CostContext | None = None) -> float | None:
+    """Cost of one catalog unit. A package's is its dishes' cost per guest (see packages.py)."""
     if item.category.value == "package":
-        return None  # a package without components has no computable cost
+        if not item.slots:
+            return None
+        ctx = ctx or default_context()
+        return breakdown(item, by_sku, ctx.guests, ctx.rules, ctx.choice).cost_per_guest
     return item.cost
 
 
-def missing_parts(item: CatalogItem, by_sku: dict[str, CatalogItem]) -> list[str]:
-    """Names of what makes an item's cost unknown (itself, or its components)."""
-    if item.components:
-        out = []
-        for c in item.components:
-            part = by_sku.get(c.sku)
-            if part is None:
-                out.append(f"{c.sku} (לא בקטלוג)")
-            elif unit_cost(part, by_sku) is None:
-                out.extend(missing_parts(part, by_sku) or [part.name_he])
-        return out
+def missing_parts(item: CatalogItem, by_sku: dict[str, CatalogItem],
+                  ctx: CostContext | None = None) -> list[str]:
+    """What makes an item's cost unknown, as "<what>: <why>"."""
     if item.category.value == "package":
-        return [f"{item.name_he}: אין רכיבים"]
-    return [item.name_he] if item.cost is None else []
+        if not item.slots:
+            return [f"{item.name_he}: אין בחבילה מנות"]
+        ctx = ctx or default_context()
+        return breakdown(item, by_sku, ctx.guests, ctx.rules, ctx.choice).missing
+    return [f"{item.name_he}: עלות חסרה"] if item.cost is None else []
+
+
+def line_context(ln, item: CatalogItem, rules: BusinessSettings | None,
+                 choices: dict | None) -> CostContext | None:
+    """A quote line's package context: its own guest count and the event's chosen dishes."""
+    if item.category.value != "package":
+        return None
+    guests = int(ln.quantity) if item.unit.value == "per_guest" and ln.quantity else None
+    return default_context(rules, guests, (choices or {}).get(item.sku))
 
 
 class GroupCost(BaseModel):
@@ -80,7 +91,8 @@ class CostSummary(BaseModel):
     floor: float | None = None
 
 
-def fill_missing(quote, by_sku: dict[str, CatalogItem]):
+def fill_missing(quote, by_sku: dict[str, CatalogItem], rules: BusinessSettings | None = None,
+                 choices: dict | None = None):
     """A quote with every unknown line cost filled from the current menu.
 
     A line's cost is a snapshot from when the quote was priced, so later price changes don't
@@ -91,9 +103,40 @@ def fill_missing(quote, by_sku: dict[str, CatalogItem]):
     lines = []
     for ln in quote.lines:
         if ln.unit_cost is None and ln.sku in by_sku:
-            cost = unit_cost(by_sku[ln.sku], by_sku)
+            item = by_sku[ln.sku]
+            cost = unit_cost(item, by_sku, line_context(ln, item, rules, choices))
             if cost is not None:
                 ln = ln.model_copy(update={"unit_cost": cost})
+        lines.append(ln)
+    return quote.model_copy(update={"lines": lines})
+
+
+def missing_detail(quote, by_sku: dict[str, CatalogItem], rules: BusinessSettings | None = None,
+                   choices: dict | None = None) -> list[str]:
+    """Exactly what's missing for a priced quote's cost: "<dish>: <why>", deepest level."""
+    out: set[str] = set()
+    for ln in quote.lines:
+        if ln.unit_cost is not None:
+            continue
+        item = by_sku.get(ln.sku)
+        if item is None:
+            out.add(f"{ln.name_he}: לא קיים בתפריט")
+            continue
+        out.update(missing_parts(item, by_sku, line_context(ln, item, rules, choices))
+                   or [f"{ln.name_he}: עלות חסרה"])
+    return sorted(out)
+
+
+def refresh_package_costs(quote, by_sku: dict[str, CatalogItem],
+                          rules: BusinessSettings | None, choices: dict | None):
+    """Re-snapshot package lines after the event's dishes changed (a deliberate change, so the
+    new dishes' current costs apply). Other lines keep their snapshot."""
+    lines = []
+    for ln in quote.lines:
+        item = by_sku.get(ln.sku)
+        if item is not None and item.category.value == "package":
+            ln = ln.model_copy(update={"unit_cost": unit_cost(
+                item, by_sku, line_context(ln, item, rules, choices))})
         lines.append(ln)
     return quote.model_copy(update={"lines": lines})
 

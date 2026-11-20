@@ -163,7 +163,11 @@ def test_kitchen_sheet_aggregates_won_events(env):
     sheet = kitchen_sheet(env["crm"], env["repo"], env["catalog"].all(T), T,
                           TODAY + timedelta(days=12))
     food = {f.sku: f for f in sheet.food}
-    assert food["PKG-MEAT-STD"].quantity == 150 and len(food["PKG-MEAT-STD"].events) == 2
+    # the package is broken into its dishes: the kitchen sees the main dish, not the package
+    assert "PKG-MEAT-STD" not in food
+    pkg = env["catalog"].get(T, "PKG-MEAT-STD")
+    main = next(sl for sl in pkg.slots if sl.id == "main").options[0]
+    assert food[main].quantity == 150 and len(food[main].events) == 2
     assert sheet.total_guests == 150 and len(sheet.events) == 2
     assert all(e.staff for e in sheet.events) and "STF-WAITER" not in food
 
@@ -344,7 +348,7 @@ def test_cost_increase_lists_affected_quotes_and_opens_a_task(env):
     c, h = _api(env)
     try:
         pkg = next(ln for ln in q.tier().quote.lines if ln.sku.startswith("PKG-"))
-        comp = env["catalog"].get(T, pkg.sku).components[0].sku  # an ingredient of the package
+        comp = env["catalog"].get(T, pkg.sku).slots[0].options[0]  # a default dish of the package
         old = env["catalog"].get(T, comp).cost
         r = c.patch(f"/catalog/{comp}", headers=h, json={"cost": round(old * 1.5, 2)}).json()
         assert r["item"]["cost_source"] == "manual" and r["item"]["cost_updated_at"]
@@ -392,5 +396,89 @@ def test_import_api_preview_then_apply(env):
         assert prev["errors"] and env["catalog"].get(T, "SAL-ISR").cost != 999  # nothing written
         done = c.post("/catalog/import?apply=true", headers=h, files=files).json()
         assert done["applied"] and env["catalog"].get(T, "SAL-ISR").cost == 999
+    finally:
+        app.dependency_overrides.clear()
+
+
+# ---------- stage 2: dishes per event ----------
+
+def _send(env, q):
+    q.status = __import__("app.schemas.quote", fromlist=["QuoteStatus"]).QuoteStatus.sent
+    return env["repo"].save(q)
+
+
+def test_owner_picks_dishes_cost_follows_and_timeline_records_it(env):
+    q, deal = make_quote(env, guests=180)
+    c, h = _api(env)
+    try:
+        m = c.get(f"/quotes/{q.id}/menu", headers=h).json()
+        pkg = next(p for p in m["packages"] if p["sku"] == "PKG-MEAT-STD")
+        assert pkg["guests"] == 180 and pkg["breakdown"]["rows"]
+        main = next(sl for sl in pkg["slots"] if sl["id"] == "main")
+        other = next(o["sku"] for o in main["options"] if o["sku"] not in main["chosen"])
+        line_cost = lambda qq: next(ln["unit_cost"] for ln in qq["tiers"][1]["quote"]["lines"]  # noqa: E731
+                                    if ln["sku"] == "PKG-MEAT-STD")
+        before = line_cost(c.get(f"/quotes/{q.id}", headers=h).json())
+        r = c.put(f"/quotes/{q.id}/menu", headers=h,
+                  json={"package": "PKG-MEAT-STD", "choice": {"main": [other]}})
+        assert r.status_code == 200
+        pkg2 = next(p for p in r.json()["packages"] if p["sku"] == "PKG-MEAT-STD")
+        assert other in [row["sku"] for row in pkg2["breakdown"]["rows"]]
+        after = line_cost(c.get(f"/quotes/{q.id}", headers=h).json())
+        assert after != before  # the package cost snapshot follows the dishes
+        assert any("עודכנו מנות" in a.text for a in env["crm"].timeline(T, deal.id))
+        bad = c.put(f"/quotes/{q.id}/menu", headers=h,
+                    json={"package": "PKG-MEAT-STD", "choice": {"main": ["SAL-ISR"]}})
+        assert bad.status_code == 422 and "אינה ברשימה" in bad.json()["detail"]
+        d = c.get(f"/crm/deals/{deal.id}/menu", headers=h).json()
+        assert d["packages"][0]["sku"] == "PKG-MEAT-STD"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_customer_picks_dishes_in_the_link_without_seeing_costs(env):
+    q, deal = make_quote(env, guests=120, days=30)
+    q = _send(env, q)
+    v = env["portal"].view(q.public_token)
+    pkg = next(p for p in v.menu if p.sku == "PKG-MEAT-STD")
+    salads = next(sl for sl in pkg.slots if sl.id == "salads")
+    pick = [o["sku"] for o in salads.options][-3:]
+    v2 = env["portal"].choose_menu(q.public_token, "PKG-MEAT-STD", {"salads": pick})
+    assert next(sl for sl in v2.menu[0].slots if sl.id == "salads").chosen == pick
+    assert env["repo"].get(T, q.id).menu_choices["PKG-MEAT-STD"]["salads"] == pick
+    assert any("הלקוח בחר מנות" in a.text for a in env["crm"].timeline(T, deal.id))
+    dumped = v2.model_dump_json()
+    for word in ("unit_cost", "cost", "per_guest_amount", "yield", "breakdown"):
+        assert f'"{word}"' not in dumped
+    # owner-only slot (bread): refused
+    with pytest.raises(PortalError, match="בעל העסק"):
+        env["portal"].choose_menu(q.public_token, "PKG-MEAT-STD", {"bread": ["SIDE-BREAD"]})
+
+
+def test_customer_cannot_change_dishes_after_the_lock(env):
+    env["settings"].update(T, {"menu_lock_days": 7})
+    q, _ = make_quote(env, guests=80, days=5)  # event in 5 days, lock is 7 days before
+    q = _send(env, q)
+    v = env["portal"].view(q.public_token)
+    assert v.menu_lock.customer_can_choose is False and "7 ימים" in v.menu_lock.reason
+    with pytest.raises(PortalError):
+        env["portal"].choose_menu(q.public_token, "PKG-MEAT-STD", {"main": ["MAIN-KEBAB"]})
+    # a draft (not sent yet) isn't open for the customer either
+    q2, _ = make_quote(env, guests=80, days=40)
+    assert env["portal"].view(q2.public_token).menu_lock.customer_can_choose is False
+
+
+def test_package_definition_is_validated_when_saved(env):
+    c, h = _api(env)
+    try:
+        r = c.patch("/catalog/PKG-MEAT-STD", headers=h, json={"slots": [
+            {"id": "x", "label_he": "עיקרית", "choose": 1, "options": ["MAIN-LASAGNA"]}]})
+        assert r.status_code == 422 and "לא מתאים לחבילה" in r.json()["detail"]
+        r = c.patch("/catalog/SAL-ISR", headers=h, json={"slots": []})
+        assert r.status_code == 422
+        rows = {i["sku"]: i for i in c.get("/catalog", headers=h).json()}
+        assert rows["SAL-ISR"]["kind"] == "food" and rows["SAL-ISR"]["measure"] == "g"
+        assert rows["STF-WAITER"]["kind"] == "staff" and rows["DRK-SOFT"]["kind"] == "drink"
+        assert rows["PKG-MEAT-STD"]["kind"] == "package"
     finally:
         app.dependency_overrides.clear()

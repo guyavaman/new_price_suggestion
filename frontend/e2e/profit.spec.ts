@@ -40,7 +40,7 @@ test('missing cost blocks sending until the owner confirms, and the override is 
 
 test('menu: missing-cost filter, template download, import preview with errors, apply', async ({ page }) => {
   await page.goto('/menu');
-  await page.getByRole('button', { name: /עלות חסרה/ }).first().click();
+  await page.getByRole('button', { name: /חסרים נתונים/ }).first().click();
   await expect(page.getByText('גבינות').first()).toBeVisible();
 
   await page.getByRole('button', { name: 'ייבוא מאקסל' }).click();

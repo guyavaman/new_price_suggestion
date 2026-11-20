@@ -56,6 +56,44 @@ import { PublicQuote, ServiceChat } from '../core/models';
           }
         </div>
 
+        @if (q.menu?.length) {
+          <section class="card dishes" aria-labelledby="dishes-h">
+            <h2 id="dishes-h">המנות באירוע</h2>
+            @if (q.menu_lock?.customer_can_choose) {
+              <p class="muted small">אפשר לבחור את המנות@if (q.menu_lock?.lock_date) { עד {{ q.menu_lock!.lock_date | heDate }}}. מה שלא תבחרו, נבחר אנחנו.</p>
+            }
+            @for (p of q.menu; track p.sku; let first = $first) {
+              <details class="pkg" [open]="first">
+                <summary><h3>{{ p.name_he }} <small class="muted">· {{ p.tiers.join(', ') }}</small></h3></summary>
+                @for (s of p.slots; track s.id) {
+                  @let open = q.menu_lock?.customer_can_choose && s.can_choose && s.options.length > 1;
+                  <fieldset class="slot">
+                    <legend>{{ s.label_he }}@if (open) { <span class="muted"> · לבחור {{ s.choose === 1 ? 'אחת' : s.choose }} ({{ countOf(p.sku, s.id) }}/{{ s.choose }})</span> }</legend>
+                    @if (open) {
+                      <div class="chips">
+                        @for (o of s.options; track o.sku) {
+                          <button type="button" class="chip" [class.on]="isPicked(p.sku, s.id, o.sku)" [attr.aria-pressed]="isPicked(p.sku, s.id, o.sku)"
+                                  [title]="o.description_he" (click)="toggleDish(p.sku, s.id, o.sku, s.choose)">{{ o.name_he }}</button>
+                        }
+                      </div>
+                    } @else {
+                      <p class="chosen">{{ names(s) }}</p>
+                    }
+                  </fieldset>
+                }
+                @if (menuDirty(p.sku)) {
+                  <div class="row">
+                    <button class="btn" [disabled]="busy() || !menuReady(p)" (click)="saveDishes(p.sku)">שמירת הבחירה</button>
+                    <button class="btn ghost" type="button" (click)="resetDishes(p.sku)">ביטול</button>
+                    @if (!menuReady(p)) { <span class="muted small">צריך לבחור בדיוק את מספר המנות בכל חלק</span> }
+                  </div>
+                }
+              </details>
+            }
+            @if (menuSaved()) { <p class="ok small" role="status">הבחירה נשמרה 👍</p> }
+          </section>
+        }
+
         @if (q.can_accept) {
           <div class="accept card">
             <div><b>בחרתם: {{ selected()?.name }}</b> · {{ selected()?.total | ils }}
@@ -133,6 +171,18 @@ import { PublicQuote, ServiceChat } from '../core/models';
     .tier b { font-family: var(--display); font-size: 1.6rem; color: var(--olive); }
     .tier ul { margin: 6px 0 0; padding-inline-start: 18px; font-size: .88rem; display: grid; gap: 2px; }
     .svc { font-size: .8rem; color: var(--muted); margin: 6px 0 0; }
+    .dishes { display: grid; gap: 12px; margin: 0 0 16px; }
+    .dishes h2 { margin: 0; font-size: 1.1rem; }
+    .dishes .pkg[open] > :not(summary) { margin-top: 10px; }
+    .dishes .pkg > fieldset, .dishes .pkg > .row { display: block; }
+    .dishes summary { cursor: pointer; } .dishes summary h3 { display: inline; }
+    .dishes .pkg + .pkg { border-top: 1px solid var(--line); padding-top: 12px; }
+    .dishes h3 { margin: 0; font-size: 1rem; }
+    .dishes .slot { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .dishes legend { padding: 0; font-weight: 600; margin-bottom: 6px; }
+    .dishes .chosen { margin: 0; }
+    .dishes .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .ok { color: var(--ok); margin: 0; }
     .accept { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; bottom: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
     .big { font-size: 1.05rem; padding: 12px 22px; } .small { font-size: .85rem; }
   `],
@@ -142,6 +192,38 @@ export class CustomerQuoteComponent {
   token = input.required<string>();
   q = signal<PublicQuote | null>(null);
   pick = signal('recommended');
+  // dishes the customer is choosing: {package: {slot: [sku]}}
+  dishDraft = signal<Record<string, Record<string, string[]>>>({});
+  menuSaved = signal(false);
+  private savedDishes(): Record<string, Record<string, string[]>> {
+    return Object.fromEntries((this.q()?.menu ?? []).map((p) => [p.sku, Object.fromEntries(p.slots.map((s) => [s.id, s.chosen]))]));
+  }
+  isPicked(p: string, s: string, sku: string) { return this.dishDraft()[p]?.[s]?.includes(sku) ?? false; }
+  countOf(p: string, s: string) { return this.dishDraft()[p]?.[s]?.length ?? 0; }
+  toggleDish(p: string, s: string, sku: string, choose: number) {
+    this.menuSaved.set(false);
+    this.dishDraft.update((d) => {
+      const cur = [...(d[p]?.[s] ?? [])];
+      const i = cur.indexOf(sku);
+      if (i >= 0) cur.splice(i, 1); else if (choose === 1) cur.splice(0, cur.length, sku); else cur.push(sku);
+      return { ...d, [p]: { ...d[p], [s]: cur } };
+    });
+  }
+  names(s: { options: { sku: string; name_he: string }[]; chosen: string[] }) {
+    return s.chosen.map((c) => s.options.find((o) => o.sku === c)?.name_he ?? c).join(' · ');
+  }
+  menuDirty(p: string) { return JSON.stringify(this.dishDraft()[p]) !== JSON.stringify(this.savedDishes()[p]); }
+  menuReady(p: { sku: string; slots: { id: string; choose: number }[] }) { return p.slots.every((s) => this.countOf(p.sku, s.id) === s.choose); }
+  resetDishes(p: string) { this.dishDraft.update((d) => ({ ...d, [p]: structuredClone(this.savedDishes()[p]) })); }
+  saveDishes(p: string) {
+    const before = this.savedDishes()[p];
+    const choice = Object.fromEntries(Object.entries(this.dishDraft()[p]).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(before[k])));
+    this.busy.set(true); this.error.set('');
+    this.api.choosePublicMenu(this.token(), p, choice).subscribe({
+      next: (q) => { this.busy.set(false); this.q.set(q); this.dishDraft.set(this.savedDishes()); this.menuSaved.set(true); },
+      error: (e) => { this.busy.set(false); this.error.set(e.error?.detail ?? 'לא ניתן לשמור את הבחירה'); },
+    });
+  }
   busy = signal(false);
   error = signal('');
   guests: number | null = null;
@@ -155,7 +237,7 @@ export class CustomerQuoteComponent {
   constructor() { effect(() => this.load(this.token()), { allowSignalWrites: true }); }
   load(token: string) {
     this.api.publicQuote(token).subscribe({
-      next: (q) => { this.q.set(q); this.pick.set(q.selected_tier); this.guests = q.final_guest_count ?? q.event.guests; },
+      next: (q) => { this.q.set(q); this.pick.set(q.selected_tier); this.guests = q.final_guest_count ?? q.event.guests; this.dishDraft.set(this.savedDishes()); },
       error: () => this.error.set('הקישור לא תקין או שפג תוקפו.'),
     });
   }

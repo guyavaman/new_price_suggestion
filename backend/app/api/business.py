@@ -29,9 +29,11 @@ from app.crm.models import ActivityKind, Actor, Deal
 from app.crm.service import CrmService
 from app.deps import get_catalog_service, get_crm, get_repo, get_settings_service, get_tenant
 from app.integrations.config import TenantConfig
-from app.schemas.catalog import CatalogItem, CostSource
+from app.schemas.catalog import CatalogItem, CostSource, Measure, Slot
 from app.services.cost_impact import ImpactRow, impact_of
-from app.services.costing import missing_parts, unit_cost
+from app.services.costing import default_context, missing_parts, unit_cost
+from app.services.event_menu import PackageMenu, owner_menu
+from app.services.packages import package_errors
 
 router = APIRouter(tags=["business"])
 
@@ -81,6 +83,8 @@ class ItemPatch(BaseModel):
     tags: list[str] | None = None
     cost: float | None = Field(None, ge=0, description="Per unit, before VAT. null = unknown")
     cost_source: CostSource | None = None
+    yield_amount: float | None = Field(None, gt=0, description="What one unit yields (g/portions)")
+    slots: list[Slot] | None = None
 
 
 class CatalogPatchOut(BaseModel):
@@ -89,7 +93,9 @@ class CatalogPatchOut(BaseModel):
 
 
 class CatalogRow(TenantCatalogItem):
-    """Owner view of an item: its cost as the engine computes it (packages from components)."""
+    """Owner view of an item: its cost as the engine computes it (packages from their dishes,
+    at the reference guest count and default dishes)."""
+    measure: Measure | None = None  # food/drinks: grams or portions, from the portion rules
     unit_cost: float | None = None
     cost_missing: list[str] = Field(default_factory=list)
     item_margin: float | None = None  # (price - cost) / price
@@ -97,14 +103,19 @@ class CatalogRow(TenantCatalogItem):
 
 @router.get("/catalog", response_model=list[CatalogRow])
 def list_catalog(t: TenantConfig = Depends(get_tenant),
-                 svc: CatalogService = Depends(get_catalog_service)):
+                 svc: CatalogService = Depends(get_catalog_service),
+                 s: SettingsService = Depends(get_settings_service)):
     items = svc.all(t.tenant_id)
     by_sku = {i.sku: i for i in items}
+    rules = s.get(t.tenant_id)
+    ctx = default_context(rules)
     rows = []
     for i in items:
-        uc = unit_cost(i, by_sku)
-        rows.append(CatalogRow(**i.model_dump(), unit_cost=uc,
-                               cost_missing=[] if uc is not None else missing_parts(i, by_sku),
+        uc = unit_cost(i, by_sku, ctx)
+        rule = rules.portion_rules.get(i.category.value)
+        rows.append(CatalogRow(**i.model_dump(exclude={"kind"}),
+                               measure=rule.measure if rule else None, unit_cost=uc,
+                               cost_missing=[] if uc is not None else missing_parts(i, by_sku, ctx),
                                item_margin=round((i.price - uc) / i.price, 4)
                                if uc is not None and i.price else None))
     return rows
@@ -130,9 +141,18 @@ def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
     if cur is None:
         raise HTTPException(404, "Item not found")
     old_cost = cur.cost
+    if "slots" in patch:
+        if cur.category.value != "package":
+            raise HTTPException(422, "רק לחבילה יש חלקים לבחירה")
+        draft = cur.model_copy(update={"slots": body.slots or []})
+        errs = package_errors(draft, {i.sku: i for i in svc.all(t.tenant_id)})
+        if errs:
+            raise HTTPException(422, "; ".join(errs))
+        patch["slots"] = [sl.model_dump() for sl in body.slots or []]
+        patch["cost_source"] = CostSource.components
     if "cost" in patch:
-        if cur.components or cur.category.value == "package":
-            raise HTTPException(422, "עלות של חבילה מחושבת מהרכיבים שלה ולא מוזנת ידנית")
+        if cur.category.value == "package":
+            raise HTTPException(422, "עלות של חבילה מחושבת מהמנות שלה ולא מוזנת ידנית")
         patch["cost_updated_at"] = datetime.now(UTC)
         patch.setdefault("cost_source", CostSource.manual if patch["cost"] is not None else None)
     try:
@@ -143,7 +163,7 @@ def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
     rules = s.get(t.tenant_id)
     if (old_cost is not None and item.cost is not None
             and item.cost > old_cost * (1 + rules.cost_alert_threshold)):
-        impact = _impact(t.tenant_id, sku, svc, crm, repo)
+        impact = _impact(t.tenant_id, sku, svc, crm, repo, rules)
         if impact:
             lost = -sum(r.delta for r in impact)
             n_q = sum(r.kind == "open_quote" for r in impact)
@@ -155,9 +175,9 @@ def patch_item(sku: str, body: ItemPatch, t: TenantConfig = Depends(get_tenant),
     return CatalogPatchOut(item=item, cost_impact=impact)
 
 
-def _impact(tenant: str, sku: str, svc: CatalogService, crm: CrmService, repo):
+def _impact(tenant: str, sku: str, svc: CatalogService, crm: CrmService, repo, rules=None):
     return impact_of(sku, svc.items(tenant), repo.list(tenant), crm.deals.list(tenant),
-                     date.today())
+                     date.today(), rules)
 
 
 @router.get("/catalog/import/template", tags=["import"])
@@ -189,10 +209,11 @@ async def import_catalog(file: UploadFile, apply: bool = False,
         cur = svc.get(t.tenant_id, item.sku)
         svc.upsert(t.tenant_id, CatalogItem.model_validate(item.model_dump()),
                    active=active if active is not None else (cur.active if cur else True))
-    threshold = s.get(t.tenant_id).cost_alert_threshold
+    rules = s.get(t.tenant_id)
     rises = [i.sku for i, _ in items if old_cost.get(i.sku) and i.cost
-             and i.cost > old_cost[i.sku] * (1 + threshold)]
-    rows = {r.quote_id: r for sku in rises for r in _impact(t.tenant_id, sku, svc, crm, repo)}
+             and i.cost > old_cost[i.sku] * (1 + rules.cost_alert_threshold)]
+    rows = {r.quote_id: r for sku in rises
+            for r in _impact(t.tenant_id, sku, svc, crm, repo, rules)}
     if rows:
         lost = -sum(r.delta for r in rows.values())
         crm.add_task(t.tenant_id, f"ייבוא עלויות: {len(rises)} פריטים התייקרו, "
@@ -207,11 +228,12 @@ async def import_catalog(file: UploadFile, apply: bool = False,
 @router.get("/catalog/{sku}/cost-impact", response_model=list[ImpactRow])
 def cost_impact(sku: str, t: TenantConfig = Depends(get_tenant),
                 svc: CatalogService = Depends(get_catalog_service),
-                crm: CrmService = Depends(get_crm), repo=Depends(get_repo)):
+                crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+                s: SettingsService = Depends(get_settings_service)):
     """Open quotes and upcoming booked events whose profit changed since they were priced."""
     if svc.get(t.tenant_id, sku) is None:
         raise HTTPException(404, "Item not found")
-    return _impact(t.tenant_id, sku, svc, crm, repo)
+    return _impact(t.tenant_id, sku, svc, crm, repo, s.get(t.tenant_id))
 
 
 # ---------- calendar & kitchen ----------
@@ -228,8 +250,33 @@ def calendar(month: str, t: TenantConfig = Depends(get_tenant),
 
 @router.get("/kitchen", response_model=KitchenSheet)
 def kitchen(day: date, t: TenantConfig = Depends(get_tenant), crm: CrmService = Depends(get_crm),
-            repo=Depends(get_repo), svc: CatalogService = Depends(get_catalog_service)):
-    return kitchen_sheet(crm, repo, svc.all(t.tenant_id), t.tenant_id, day)
+            repo=Depends(get_repo), svc: CatalogService = Depends(get_catalog_service),
+            s: SettingsService = Depends(get_settings_service)):
+    return kitchen_sheet(crm, repo, svc.all(t.tenant_id), t.tenant_id, day, s.get(t.tenant_id))
+
+
+class DealMenu(BaseModel):
+    quote_id: str | None
+    quote_number: str | None
+    tier: str | None
+    packages: list[PackageMenu]
+
+
+@router.get("/crm/deals/{deal_id}/menu", response_model=DealMenu, tags=["menu"])
+def deal_menu(deal_id: str, t: TenantConfig = Depends(get_tenant),
+              crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
+              svc: CatalogService = Depends(get_catalog_service),
+              s: SettingsService = Depends(get_settings_service)) -> DealMenu:
+    """Owner-only: the event's dishes, quantities and cost (selected package of its quote)."""
+    deal = crm.deals.get(t.tenant_id, deal_id)
+    if deal is None:
+        raise HTTPException(404, "Deal not found")
+    q = latest_quote(repo, deal)
+    if q is None:
+        return DealMenu(quote_id=None, quote_number=None, tier=None, packages=[])
+    pk = owner_menu(q, {i.sku: i for i in svc.all(t.tenant_id)}, s.get(t.tenant_id),
+                    only_selected=True)
+    return DealMenu(quote_id=q.id, quote_number=q.number, tier=q.tier().name, packages=pk)
 
 
 # ---------- automation & invoices ----------

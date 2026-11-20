@@ -1,15 +1,16 @@
+import { PackageMenuComponent } from '../core/package-menu.component';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe, RelativePipe } from '../core/format';
 import { ACTOR, EVENT_TYPE, KASHRUT, MEAL, QUOTE_STATUS, REJECT_REASONS, SOURCE, STAGES, TEMP, dietLabel } from '../core/labels';
-import { BusinessSettings, CustomerMessage, DealDetail, DealStage } from '../core/models';
+import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu } from '../core/models';
 
 @Component({
   selector: 'app-deal-detail',
   standalone: true,
-  imports: [RouterLink, FormsModule, IlsPipe, HeDatePipe, RelativePipe],
+  imports: [RouterLink, FormsModule, IlsPipe, HeDatePipe, RelativePipe, PackageMenuComponent],
   template: `
     <a routerLink="/events" class="back">→ כל האירועים</a>
     @if (error()) { <div class="err">{{ error() }}</div> }
@@ -98,6 +99,16 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage } from '../cor
               </form>
             } @else { <p class="muted small">חשבונית מופקת אחרי שהאירוע נסגר</p> }
           </section>
+
+          @if (menu(); as m) {
+            @if (m.packages.length) {
+              <section class="card" aria-labelledby="dm-h">
+                <div class="h"><h2 id="dm-h">תפריט האירוע</h2><small class="muted">{{ m.tier }} · {{ m.quote_number }} · רק לך</small></div>
+                <app-package-menu [packages]="m.packages" [busy]="menuBusy()" (save)="saveMenu($event)" />
+                @if (menuError()) { <p class="err" role="alert">{{ menuError() }}</p> }
+              </section>
+            }
+          }
 
           <section class="card">
             <h2>ציר פעילות</h2>
@@ -244,7 +255,21 @@ export class DealDetailComponent {
     effect(() => this.load(this.id()), { allowSignalWrites: true });
     this.api.settings().subscribe((s) => this.settings.set(s));
   }
+  menu = signal<DealMenu | null>(null);
+  menuBusy = signal(false);
+  menuError = signal('');
+  saveMenu(e: { pkg: string; choice: Record<string, string[]> }) {
+    const qid = this.menu()?.quote_id;
+    if (!qid) return;
+    this.menuBusy.set(true); this.menuError.set('');
+    this.api.setQuoteMenu(qid, e.pkg, e.choice).subscribe({
+      next: () => { this.menuBusy.set(false); this.load(); },
+      error: (err) => { this.menuBusy.set(false); this.menuError.set(err.error?.detail ?? 'לא ניתן לשמור את המנות'); },
+    });
+  }
+
   load(id = this.id()) {
+    this.api.dealMenu(id).subscribe({ next: (m) => this.menu.set(m), error: () => this.menu.set(null) });
     this.api.deal(id).subscribe({ next: (x) => this.x.set(x), error: () => this.error.set('האירוע לא נמצא או שהשרת לא זמין') });
     this.api.dealMessages(id).subscribe((ms) => {
       this.messages.set(ms);

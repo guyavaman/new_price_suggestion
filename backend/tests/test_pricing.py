@@ -16,9 +16,9 @@ def test_full_bar_mitzvah_quote(engine, bar_mitzvah_req, bar_mitzvah_plan):
     assert "STF-HEAD-WAITER" in lines  # ≥ 80 guests
     assert "STF-BARTENDER" not in lines  # open bar already includes one
     assert "LOG-DELIVERY-C" in lines
-    assert q.subtotal == 39850.0
+    assert q.subtotal == 39450.0  # 8 vegan guests at the vegan package price (₪115)
     assert q.discount_rate == 0.05
-    assert q.total == round((39850 - 1992.5) * 1.18, 2)
+    assert q.total == round((39450 - 1972.5) * 1.18, 2)
     assert q.guards == []
 
 

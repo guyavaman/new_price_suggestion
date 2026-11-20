@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from app.schemas.catalog import CatalogItem
 from app.schemas.quote import QuoteStatus
-from app.services.costing import unit_cost
+from app.services.costing import line_context, unit_cost
+from app.services.packages import resolve_choice
 
 
 class ImpactRow(BaseModel):
@@ -30,16 +31,17 @@ class ImpactRow(BaseModel):
     delta: float  # profit change (negative = profit dropped)
 
 
-def _uses(item: CatalogItem, sku: str, by_sku: dict[str, CatalogItem], seen=frozenset()) -> bool:
+def _uses(item: CatalogItem, sku: str, by_sku: dict[str, CatalogItem], choice) -> bool:
+    """The line's item is `sku`, or a package whose chosen dishes include it."""
     if item.sku == sku:
         return True
-    if item.sku in seen:
+    if item.category.value != "package":
         return False
-    return any(c.sku in by_sku and _uses(by_sku[c.sku], sku, by_sku, seen | {item.sku})
-               for c in item.components)
+    return any(sku in picked for picked in resolve_choice(item, choice).values())
 
 
-def impact_of(sku: str, catalog: list[CatalogItem], quotes, deals, today: date) -> list[ImpactRow]:
+def impact_of(sku: str, catalog: list[CatalogItem], quotes, deals, today: date,
+              rules=None) -> list[ImpactRow]:
     """Profit change, snapshot → today's catalog, for open quotes and upcoming booked events
     whose selected tier uses `sku` (directly or inside a package)."""
     by_sku = {i.sku: i for i in catalog}
@@ -59,9 +61,10 @@ def impact_of(sku: str, catalog: list[CatalogItem], quotes, deals, today: date) 
         touched = False
         for ln in pq.lines:
             item = by_sku.get(ln.sku)
-            if ln.unit_cost is None or item is None or not _uses(item, sku, by_sku):
+            choice = (q.menu_choices or {}).get(ln.sku)
+            if ln.unit_cost is None or item is None or not _uses(item, sku, by_sku, choice):
                 continue
-            now_cost = unit_cost(item, by_sku)
+            now_cost = unit_cost(item, by_sku, line_context(ln, item, rules, q.menu_choices))
             if now_cost is None:
                 continue
             touched = True

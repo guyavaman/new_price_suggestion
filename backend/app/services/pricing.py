@@ -20,7 +20,7 @@ from app.schemas.quote import (
     PricedQuote,
     QuoteLine,
 )
-from app.services.costing import unit_cost
+from app.services.costing import default_context, unit_cost
 
 ROLE_HE = {ItemRole.waiter: "מלצר", ItemRole.head_waiter: "מנהל אירוע",
            ItemRole.bartender: "ברמן", ItemRole.supervision: "השגחת מהדרין",
@@ -64,8 +64,9 @@ def compute_quantity(item: CatalogItem, for_guests: int | None, quantity: float 
 
 class PricingEngine:
     def __init__(self, catalog: list[CatalogItem], vat_rate: float | None = None,
-                 rules: BusinessSettings | None = None):
+                 rules: BusinessSettings | None = None, choices: dict | None = None):
         self.by_sku = {i.sku: i for i in catalog}
+        self.choices = choices or {}  # package sku -> slot -> chosen dishes (the event's)
         self.by_role: dict[ItemRole, CatalogItem] = {}
         for i in catalog:
             if i.role and i.role not in self.by_role:
@@ -73,13 +74,20 @@ class PricingEngine:
         self.rules = rules or DEFAULT_RULES
         self.vat_rate = self.rules.vat_rate if vat_rate is None else vat_rate
 
+    def _unit_cost(self, item: CatalogItem, qty: float) -> float | None:
+        ctx = None
+        if item.category.value == "package":
+            guests = int(qty) if item.unit.value == "per_guest" and qty else None
+            ctx = default_context(self.rules, guests, self.choices.get(item.sku))
+        return unit_cost(item, self.by_sku, ctx)
+
     def _line(self, item: CatalogItem, qty: float, note: str, source: LineSource,
               confidence: Confidence, reason: str = "") -> QuoteLine:
         return QuoteLine(
             sku=item.sku, name_he=item.name_he, unit=item.unit.value, unit_price=item.price,
             quantity=qty, total=_r2(qty * item.price), note=note, source=source,
             confidence=confidence, reason=reason,
-            unit_cost=unit_cost(item, self.by_sku), cost_group=item.cost_group.value,
+            unit_cost=self._unit_cost(item, qty), cost_group=item.cost_group.value,
         )
 
     def price(self, req: ExtractedRequest, plan: MenuPlan) -> PricedQuote:

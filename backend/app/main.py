@@ -12,7 +12,7 @@ from app.api import agent as agent_api
 from app.api import business as business_api
 from app.api import crm as crm_api
 from app.api import public as public_api
-from app.business.settings import SettingsService
+from app.business.settings import BusinessSettings, SettingsService
 from app.crm.models import ActivityKind, Actor
 from app.crm.service import CrmService
 from app.deps import (
@@ -40,8 +40,16 @@ from app.schemas.catalog import CatalogItem
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import QuoteStatus, TierQuote
 from app.services.corrections import Correction, CorrectionStore, Review
-from app.services.costing import CostSummary, fill_missing, missing_parts, profit_check, summarize
+from app.services.costing import (
+    CostSummary,
+    fill_missing,
+    missing_detail,
+    profit_check,
+    summarize,
+)
 from app.services.editing import EditService
+from app.services.event_menu import MenuLock, PackageMenu, apply_choice, describe, owner_menu
+from app.services.event_menu import lock as menu_lock
 from app.services.extraction import ExtractionService
 from app.services.menu import MenuPlanner
 from app.services.pricing import PricingEngine
@@ -173,17 +181,19 @@ class QuoteProfit(BaseModel):
     send_blockers: list[str]  # why sending needs the owner's explicit approval
 
 
-def quote_profit(q: StoredQuote, catalog: list[CatalogItem], floor: float) -> QuoteProfit:
+def quote_profit(q: StoredQuote, catalog: list[CatalogItem], rules: BusinessSettings
+                 ) -> QuoteProfit:
     by_sku = {i.sku: i for i in catalog}
+    floor = rules.profit_floor
     tiers, blockers = [], []
     for t in q.tiers:
-        priced = fill_missing(t.quote, by_sku)
+        priced = fill_missing(t.quote, by_sku, rules, q.menu_choices)
         s = summarize(priced, floor)
-        detail = sorted({p for m in s.missing if m["sku"] in by_sku
-                         for p in (missing_parts(by_sku[m["sku"]], by_sku) or [m["name"]])})
+        detail = missing_detail(priced, by_sku, rules, q.menu_choices)
         tiers.append(TierProfit(key=t.key, name=t.name, summary=s, missing_detail=detail))
         ok, why = profit_check(priced, floor)
-        if not ok:
+        if not ok:  # name exactly what's missing (the dish, not the package around it)
+            why = f"חסרים נתונים: {', '.join(detail)}" if s.status == "missing" and detail else why
             blockers.append(f"{t.name}: {why}")
     return QuoteProfit(floor=floor, tiers=tiers, send_blockers=blockers)
 
@@ -262,7 +272,7 @@ def get_quote_profit(quote_id: str, tenant: TenantConfig = Depends(get_tenant),
                      settings: SettingsService = Depends(get_settings_service)) -> QuoteProfit:
     """Owner-only: cost, gross profit and breakdown per tier, against the profit floor."""
     q = _get_quote(repo, tenant, quote_id)
-    return quote_profit(q, catalog, settings.get(tenant.tenant_id).profit_floor)
+    return quote_profit(q, catalog, settings.get(tenant.tenant_id))
 
 
 @app.post("/quotes/{quote_id}/edit", response_model=EditOut)
@@ -277,10 +287,57 @@ def edit_quote(quote_id: str, body: EditBody, tenant: TenantConfig = Depends(get
         raise HTTPException(status_code=409, detail="Approved quotes cannot be edited")
     r = editor.edit(q.request, q.plan, body.instruction)
     q.request, q.plan = r.request, r.plan
+    engine.choices = q.menu_choices
     q.tiers = _tiers(r.request, r.plan, catalog, engine)
     q = repo.save(q)
     return EditOut(quote=q, sync=sync.deliver(tenant, q, EventType.updated), reply=r.reply,
                    actions=r.actions, flags=r.flags)
+
+
+class OwnerMenu(BaseModel):
+    packages: list[PackageMenu]
+    lock: MenuLock
+
+
+class MenuChoiceIn(BaseModel):
+    package: str = Field(..., min_length=1, max_length=60)
+    choice: dict[str, list[str]] = Field(..., max_length=20)
+
+
+def _owner_menu(q: StoredQuote, catalog: list[CatalogItem], rules: BusinessSettings) -> OwnerMenu:
+    expired = False  # the owner's view: expiry only matters for what the customer may do
+    return OwnerMenu(packages=owner_menu(q, {i.sku: i for i in catalog}, rules),
+                     lock=menu_lock(q, rules, date.today(), expired))
+
+
+@app.get("/quotes/{quote_id}/menu", response_model=OwnerMenu, tags=["menu"])
+def get_quote_menu(quote_id: str, tenant: TenantConfig = Depends(get_tenant),
+                   repo=Depends(get_repo), catalog: list[CatalogItem] = Depends(get_catalog),
+                   settings: SettingsService = Depends(get_settings_service)) -> OwnerMenu:
+    """Owner-only: each package's dishes, quantities and cost for this event."""
+    return _owner_menu(_get_quote(repo, tenant, quote_id), catalog, settings.get(tenant.tenant_id))
+
+
+@app.put("/quotes/{quote_id}/menu", response_model=OwnerMenu, tags=["menu"])
+def set_quote_menu(quote_id: str, body: MenuChoiceIn, tenant: TenantConfig = Depends(get_tenant),
+                   repo=Depends(get_repo), catalog: list[CatalogItem] = Depends(get_catalog),
+                   settings: SettingsService = Depends(get_settings_service),
+                   crm: CrmService = Depends(get_crm)) -> OwnerMenu:
+    """The owner picks the dishes for a package (any slot, any time). Package cost is
+    re-computed from the new dishes and the change goes on the event's timeline."""
+    q = _get_quote(repo, tenant, quote_id)
+    rules = settings.get(tenant.tenant_id)
+    by_sku = {i.sku: i for i in catalog}
+    errs = apply_choice(q, body.package, body.choice, by_sku, rules, by_customer=False)
+    if errs:
+        raise HTTPException(422, "; ".join(errs))
+    q = repo.save(q)
+    deal = next(iter(crm.deals.list(tenant.tenant_id, lambda d: q.id in d.quote_ids)), None)
+    crm.log(tenant.tenant_id, ActivityKind.note,
+            f"עודכנו מנות ב{by_sku[body.package].name_he}: "
+            + describe(by_sku[body.package], body.choice, by_sku), Actor.user,
+            deal_id=deal.id if deal else None, meta={"quote_id": q.id, "menu_choice": body.package})
+    return _owner_menu(q, catalog, rules)
 
 
 @app.post("/quotes/{quote_id}/status", response_model=QuoteOut)
@@ -294,8 +351,7 @@ def set_status(quote_id: str, body: StatusBody, tenant: TenantConfig = Depends(g
         raise HTTPException(status_code=409,
                             detail=f"Cannot move from {q.status.value} to {body.status.value}")
     if body.status == QuoteStatus.sent:
-        blockers = quote_profit(q, catalog,
-                                settings.get(tenant.tenant_id).profit_floor).send_blockers
+        blockers = quote_profit(q, catalog, settings.get(tenant.tenant_id)).send_blockers
         if blockers and not body.override_floor:
             raise HTTPException(status_code=409, detail={
                 "code": "profit_floor", "message": "ההצעה דורשת אישור מפורש לפני שליחה",

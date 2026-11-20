@@ -160,6 +160,7 @@ export interface StoredQuote {
   id: string; number: string; status: QuoteStatus; selected_tier: string; source_message: string;
   request: ExtractedRequest; tiers: TierQuote[]; created_at: string; updated_at: string;
   history: { status: QuoteStatus; at: string; note: string | null }[];
+  menu_choices?: Record<string, Record<string, string[]>>;
 }
 export interface QuoteOut { quote: StoredQuote; sync: { integration_id: string; ok: boolean; detail: string }[] }
 export interface EditOut extends QuoteOut { reply: string; actions: { tool: string; input: Record<string, unknown>; error: boolean }[]; flags: string[] }
@@ -173,7 +174,7 @@ export interface TodayView {
   kpis: Kpis;
 }
 export interface CalendarDay { date: string; deals: { id: string; title: string; stage: DealStage; guests: number | null; temperature: Temperature }[]; events_booked: number; guests_booked: number; full: boolean }
-export interface KitchenItem { sku: string; name: string; category: string; quantity: number; unit: string; serves: number | null; events: { deal_id: string; title: string; quantity: number }[] }
+export interface KitchenItem { sku: string; name: string; category: string; quantity: number; unit: string; serves: number | null; problem?: string | null; events: { deal_id: string; title: string; quantity: number | null; package?: string }[] }
 export interface KitchenSheet {
   date: string; total_guests: number; missing_quotes: string[]; food: KitchenItem[];
   events: { deal_id: string; title: string; guests: number | null; location: string | null; meal_type: string | null; dietary: string[]; staff: string[]; equipment: string[]; tier: string | null }[];
@@ -183,9 +184,22 @@ export interface CatalogItem {
   tags: string[]; serves: number | null; min_qty: number | null; description_he: string; active: boolean;
   // owner-only cost data
   cost?: number | null; cost_updated_at?: string | null; cost_source?: 'manual' | 'recipe' | 'supplier' | 'components' | null;
-  components?: { sku: string; quantity: number; per_guests: number }[];
+  kind?: ItemKind; yield_amount?: number | null; slots?: Slot[]; measure?: 'g' | 'unit' | null;
   unit_cost?: number | null; cost_missing?: string[]; item_margin?: number | null;
 }
+export type ItemKind = 'food' | 'drink' | 'equipment' | 'staff' | 'logistics' | 'package';
+export interface Slot { id: string; label_he: string; choose: number; options: string[]; per_guest: number | null; customer_choice: boolean }
+export interface PortionRule { measure: 'g' | 'unit'; total_per_guest: number; extra_per_variety: number }
+export interface MenuSlot { id: string; label_he: string; choose: number; can_choose: boolean; options: { sku: string; name_he: string; description_he: string }[]; chosen: string[] }
+export interface DishRow {
+  slot_id: string; slot_label: string; sku: string; name_he: string; category: string; measure: 'g' | 'unit' | null;
+  per_guest: number | null; total_amount: number | null; units: number | null; unit: string; unit_cost: number | null; cost: number | null; problem: string | null;
+}
+export interface Breakdown { sku: string; name_he: string; guests: number; rows: DishRow[]; status: 'complete' | 'missing'; total_cost: number | null; cost_per_guest: number | null; missing: string[] }
+export interface PackageMenu { sku: string; name_he: string; tiers: string[]; guests: number; slots: MenuSlot[]; breakdown: Breakdown }
+export interface MenuLock { customer_can_choose: boolean; lock_date: string | null; reason: string | null }
+export interface OwnerMenu { packages: PackageMenu[]; lock: MenuLock }
+export interface DealMenu { quote_id: string | null; quote_number: string | null; tier: string | null; packages: PackageMenu[] }
 export interface ImpactRow {
   kind: 'open_quote' | 'booked_event'; quote_id: string; quote_number: string; deal_id: string | null; title: string;
   event_date: string | null; profit_before: number; profit_after: number; margin_before: number | null; margin_after: number | null; delta: number;
@@ -214,6 +228,7 @@ export interface BusinessSettings {
   max_events_per_day: number; max_guests_per_day: number; quote_valid_days: number; deposit_rate: number;
   payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
   invoice_provider: string; service_info: string; profit_floor: number; cost_alert_threshold: number; timezone?: string;
+  portion_rules: Record<string, PortionRule>; reference_guests: number; menu_lock_days: number;
 }
 export interface PublicQuote {
   business_name: string; business_phone: string; business_email?: string; business_id?: string; vat_rate?: number; created_at?: string | null;
@@ -224,6 +239,7 @@ export interface PublicQuote {
     subtotal?: number; discount_rate?: number; discount?: number; net?: number; vat?: number }[];
   selected_tier: string; valid_until: string; expired: boolean; deposit_rate: number; deposit_paid: number;
   can_accept: boolean; can_update_count: boolean; final_guest_count: number | null;
+  menu?: { sku: string; name_he: string; tiers: string[]; slots: MenuSlot[] }[]; menu_lock?: MenuLock | null;
 }
 
 export interface ServiceChat { status: Conversation['status'] | null; messages: { role: 'user' | 'assistant'; text: string; by: string }[]; reply?: string | null; }

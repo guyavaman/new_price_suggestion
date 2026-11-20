@@ -1,7 +1,10 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ApiService } from '../core/api.service';
-import { BusinessSettings } from '../core/models';
+import { CATEGORY } from '../core/labels';
+import { BusinessSettings, PortionRule } from '../core/models';
+
+const PORTIONED = ['salad', 'starter', 'main', 'side', 'canape', 'breakfast', 'dessert', 'drink', 'bar'];
 
 @Component({
   selector: 'app-settings',
@@ -56,6 +59,38 @@ import { BusinessSettings } from '../core/models';
           </div>
           <p class="muted">הצעה מתחת לרצפה או עם עלות חסרה תדרוש אישור לפני שליחה, ונועה תעביר אותה אליך במקום לתת מחיר.</p>
         </section>
+        <section class="card" aria-labelledby="por-h">
+          <h2 id="por-h">מנות וכמויות</h2>
+          <p class="muted small">כמה מקבל כל סועד מכל קטגוריה כשיש מנה אחת ממנה. כשיש כמה מנות מאותה קטגוריה, כל מנה מוסיפה אחוז מהכמות, והכמות מתחלקת ביניהן.
+            מזה מחושבים מגשים, כמויות למטבח ועלות החבילה.</p>
+          <div class="por-wrap">
+            <table class="por">
+              <thead><tr><th>קטגוריה</th><th>נמדד ב</th><th>לסועד, מנה אחת</th><th>תוספת לכל מנה נוספת</th><th>לדוגמה</th><th></th></tr></thead>
+              <tbody>
+                @for (k of ruleKeys(s); track k) {
+                  @let r = s.portion_rules[k];
+                  <tr>
+                    <td data-l="קטגוריה">{{ catLabel[k] || k }}</td>
+                    <td data-l="נמדד ב"><select [name]="'pm' + k" [(ngModel)]="r.measure" [attr.aria-label]="'יחידת מידה ' + (catLabel[k] || k)"><option value="g">גרם</option><option value="unit">מנות / יחידות</option></select></td>
+                    <td data-l="לסועד, מנה אחת"><input [name]="'pt' + k" type="number" min="0.01" step="any" [(ngModel)]="r.total_per_guest" [attr.aria-label]="'כמות לסועד ' + (catLabel[k] || k)"></td>
+                    <td data-l="תוספת לכל מנה נוספת"><span class="pctin"><input [name]="'pe' + k" type="number" min="0" max="100" [ngModel]="pct(r.extra_per_variety)" (ngModelChange)="r.extra_per_variety = $event / 100" [attr.aria-label]="'תוספת גיוון ' + (catLabel[k] || k)">%</span></td>
+                    <td data-l="לדוגמה" class="muted small">{{ example(r) }}</td>
+                    <td><button type="button" class="linkish" (click)="removeRule(s, k)" [attr.aria-label]="'מחיקת הכלל ל' + (catLabel[k] || k)">מחיקה</button></td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (missingRules(s).length) {
+            <label class="addrule">כלל לקטגוריה נוספת
+              <select name="newrule" [ngModel]="''" (ngModelChange)="addRule(s, $event)"><option value="">בחירה…</option>
+                @for (c of missingRules(s); track c) { <option [value]="c">{{ catLabel[c] || c }}</option> }</select></label>
+          }
+          <div class="fields">
+            <label>עלות חבילה בתפריט מחושבת ל-(סועדים)<input name="rg" type="number" min="1" max="5000" [(ngModel)]="s.reference_guests"></label>
+            <label>הלקוח יכול לבחור מנות עד (ימים לפני האירוע)<input name="ml" type="number" min="0" max="90" [(ngModel)]="s.menu_lock_days"></label>
+          </div>
+        </section>
         <section class="card">
           <h2>הצעות, מקדמה ותזכורות</h2>
           <div class="fields">
@@ -91,6 +126,21 @@ import { BusinessSettings } from '../core/models';
     .wide { width: 100%; } .sm { padding: 4px 10px; font-size: .85rem; }
     .bar { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; display: flex; gap: 12px; align-items: center; }
     .bad { color: var(--bad); }
+    .small { font-size: .82rem; }
+    .por-wrap { overflow-x: auto; margin: 8px 0; }
+    .por { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    .por th { text-align: start; font-size: .78rem; color: var(--muted); font-weight: 600; padding: 4px 6px; }
+    .por td { padding: 5px 6px; border-top: 1px solid var(--line); }
+    .por input { width: 90px; } .pctin { display: inline-flex; gap: 4px; align-items: center; } .pctin input { width: 64px; }
+    .linkish { background: none; border: 0; padding: 0; color: var(--bad); text-decoration: underline; font: inherit; font-size: .85rem; cursor: pointer; }
+    .addrule { max-width: 260px; margin-bottom: 10px; }
+    @media (max-width: 640px) {
+      .por thead { display: none; }
+      .por tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+      .por td { border: 0; padding: 2px 0; }
+      .por td:first-child { grid-column: 1 / -1; font-weight: 700; }
+      .por td[data-l]:not(:first-child)::before { content: attr(data-l); display: block; font-size: .72rem; color: var(--muted); }
+    }
   `],
 })
 export class SettingsComponent {
@@ -99,6 +149,16 @@ export class SettingsComponent {
   saving = signal(false); msg = signal(''); bad = signal(false);
   constructor() { this.api.settings().subscribe((s) => this.s.set(structuredClone(s))); }
   pct(v: number) { return Math.round(v * 1000) / 10; }
+  catLabel = CATEGORY;
+  ruleKeys(s: BusinessSettings) { return PORTIONED.filter((k) => s.portion_rules[k]).concat(Object.keys(s.portion_rules).filter((k) => !PORTIONED.includes(k))); }
+  missingRules(s: BusinessSettings) { return PORTIONED.filter((k) => !s.portion_rules[k]); }
+  addRule(s: BusinessSettings, k: string) { if (k) s.portion_rules = { ...s.portion_rules, [k]: { measure: 'unit', total_per_guest: 1, extra_per_variety: 0.2 } }; }
+  removeRule(s: BusinessSettings, k: string) { const { [k]: _, ...rest } = s.portion_rules; s.portion_rules = rest; }
+  example(r: PortionRule) {
+    const per = (n: number) => r.total_per_guest * (1 + r.extra_per_variety * (n - 1)) / n;
+    const f = (v: number) => r.measure === 'g' ? `${Math.round(v)} גרם` : `${v.toLocaleString('he-IL', { maximumFractionDigits: 2 })}`;
+    return `1 מנה: ${f(per(1))} · 3 מנות: ${f(per(3))} כל אחת`;
+  }
   split(v: string) { return v.split(',').map((x) => x.trim()).filter(Boolean); }
   save() {
     const s = this.s();

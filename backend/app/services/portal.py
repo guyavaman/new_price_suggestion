@@ -21,6 +21,14 @@ from app.payments.providers import get_provider
 from app.repositories.quotes import StatusChange, StoredQuote
 from app.schemas.quote import QuoteStatus
 from app.services.editing import QuoteEditor
+from app.services.event_menu import (
+    MenuLock,
+    PublicPackageMenu,
+    apply_choice,
+    customer_menu,
+    describe,
+    lock,
+)
 from app.services.pricing import PricingEngine
 from app.services.quotes import tiers_for
 
@@ -71,6 +79,9 @@ class PublicQuote(BaseModel):
     can_accept: bool
     can_update_count: bool
     final_guest_count: int | None
+    # the dishes in each package; customers may pick where the package allows, until the lock
+    menu: list[PublicPackageMenu] = []
+    menu_lock: MenuLock | None = None
 
 
 class CustomerPortal:
@@ -142,7 +153,32 @@ class CustomerPortal:
             can_update_count=bool(q.status == QuoteStatus.approved and event_date
                                   and (event_date - today).days >= FINAL_COUNT_CLOSES_DAYS_BEFORE),
             final_guest_count=deal.final_guest_count if deal else None,
+            menu=customer_menu(q, by_sku), menu_lock=lock(q, rules, today, expired),
         )
+
+    # ---------- dishes ----------
+    def choose_menu(self, token: str, package: str, choice: dict[str, list[str]],
+                    today: date | None = None) -> PublicQuote:
+        """The customer picks dishes for a package, within what the package lets them choose."""
+        today = today or date.today()
+        q = self._quote(token)
+        rules = self._rules(q)
+        expired = q.status != QuoteStatus.approved and today > self._valid_until(q, rules)
+        lk = lock(q, rules, today, expired)
+        if not lk.customer_can_choose:
+            raise PortalError(lk.reason or "לא ניתן לשנות מנות")
+        by_sku = {i.sku: i for i in self.catalog.all(q.tenant_id)}
+        errs = apply_choice(q, package, choice, by_sku, rules, by_customer=True)
+        if errs:
+            raise PortalError("; ".join(errs), 422)
+        self.repo.save(q)
+        deal = self._deal(q)
+        self.crm.log(q.tenant_id, ActivityKind.note,
+                     f"הלקוח בחר מנות ב{by_sku[package].name_he}: "
+                     + describe(by_sku[package], choice, by_sku),
+                     Actor.customer, deal_id=deal.id if deal else None,
+                     meta={"quote_id": q.id, "menu_choice": package})
+        return self.view(token, today)
 
     # ---------- decline ----------
     def decline(self, token: str, reason: str, today: date | None = None) -> PublicQuote:
@@ -248,7 +284,7 @@ class CustomerPortal:
         ed = QuoteEditor(q.request, q.plan, catalog)
         ed.set_guest_count(guests)
         q.request, q.plan = ed.req, ed.result_plan()
-        engine = PricingEngine(catalog, rules=self._rules(q))
+        engine = PricingEngine(catalog, rules=self._rules(q), choices=q.menu_choices)
         q.tiers = tiers_for(q.request, q.plan, catalog, engine)
         self.repo.save(q)
         deal = self._deal(q)

@@ -1,15 +1,16 @@
+import { PackageMenuComponent } from '../core/package-menu.component';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
 import { CONFIDENCE, EVENT_TYPE, KASHRUT, LINE_SOURCE, MEAL, QUOTE_STATUS, REJECT_REASONS, UNIT, dietLabel } from '../core/labels';
-import { EditOut, QuoteProfit, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
+import { EditOut, OwnerMenu, QuoteProfit, QuoteStatus, StoredQuote, TierQuote } from '../core/models';
 
 @Component({
   selector: 'app-quote-detail',
   standalone: true,
-  imports: [FormsModule, RouterLink, IlsPipe, HeDatePipe],
+  imports: [FormsModule, RouterLink, IlsPipe, HeDatePipe, PackageMenuComponent],
   template: `
     <a routerLink="/quotes" class="back">→ כל ההצעות</a>
     @if (error()) { <div class="err">{{ error() }}</div> }
@@ -125,6 +126,22 @@ import { EditOut, QuoteProfit, QuoteStatus, StoredQuote, TierQuote } from '../co
         </section>
       }
 
+      @if (menu(); as m) {
+        @if (m.packages.length) {
+          <section class="card qmenu" aria-labelledby="qm-h">
+            <div class="profit-head">
+              <h2 id="qm-h">מנות וכמויות</h2>
+              <small class="muted">
+                @if (m.lock.customer_can_choose) { הלקוח יכול לבחור בקישור @if (m.lock.lock_date) { עד {{ m.lock.lock_date | heDate }} } }
+                @else { {{ m.lock.reason }} }
+              </small>
+            </div>
+            <app-package-menu [packages]="m.packages" [busy]="menuBusy()" (save)="saveMenu($event)" />
+            @if (menuError()) { <p class="err" role="alert">{{ menuError() }}</p> }
+          </section>
+        }
+      }
+
       @if (tier(); as t) {
         <section class="card doc">
           @if (t.quote.guards.length) { <div class="warnbox"><b>בקרות שהופעלו:</b> {{ t.quote.guards.join(' · ') }}</div> }
@@ -183,6 +200,7 @@ import { EditOut, QuoteProfit, QuoteStatus, StoredQuote, TierQuote } from '../co
     }
   `,
   styles: [`
+    .qmenu { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
     .profit { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
     .profit > * { min-width: 0; }
     .profit.alarm { border-color: var(--warn); }
@@ -292,7 +310,19 @@ export class QuoteDetailComponent {
   pct(x: number) { return `${Math.round(x * 100)}%`; }
   max0(x: number) { return Math.max(0, x); }
 
+  menu = signal<OwnerMenu | null>(null);
+  menuBusy = signal(false);
+  menuError = signal('');
+  saveMenu(e: { pkg: string; choice: Record<string, string[]> }) {
+    this.menuBusy.set(true); this.menuError.set('');
+    this.api.setQuoteMenu(this.id(), e.pkg, e.choice).subscribe({
+      next: (m) => { this.menuBusy.set(false); this.menu.set(m); this.load(); },
+      error: (err) => { this.menuBusy.set(false); this.menuError.set(err.error?.detail ?? 'לא ניתן לשמור את המנות'); },
+    });
+  }
+
   load(id = this.id()) {
+    this.api.quoteMenu(id).subscribe({ next: (m) => this.menu.set(m), error: () => this.menu.set(null) });
     this.api.quoteProfit(id).subscribe({ next: (p) => this.profit.set(p), error: () => this.profit.set(null) });
     this.api.quote(id).subscribe({
       next: (q) => { this.q.set(q); this.view.set(q.selected_tier); },

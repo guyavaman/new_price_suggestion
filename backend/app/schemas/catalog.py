@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from app.schemas.extraction import DietaryTag, MealType, QuantityUnit
 
@@ -34,6 +34,55 @@ COST_GROUP = {Category.staff: CostGroup.staff, Category.equipment: CostGroup.equ
               Category.logistics: CostGroup.logistics}  # everything else is food
 
 
+class ItemKind(StrEnum):
+    """What sort of thing an item is. Each kind has its own fields and logic: food is portioned
+    per guest, drinks per guest, staff by the hour and by role, equipment and logistics per unit.
+    A package is a composition of food (and drink) items."""
+    food = "food"
+    drink = "drink"
+    equipment = "equipment"
+    staff = "staff"
+    logistics = "logistics"
+    package = "package"
+
+
+KIND = {Category.package: ItemKind.package, Category.drink: ItemKind.drink,
+        Category.bar: ItemKind.drink, Category.equipment: ItemKind.equipment,
+        Category.staff: ItemKind.staff, Category.logistics: ItemKind.logistics}  # rest: food
+
+
+class Measure(StrEnum):
+    """How a food category is portioned: by weight (grams) or by count (portions / pieces)."""
+    g = "g"
+    unit = "unit"
+
+
+class PortionRule(BaseModel):
+    """How much of one category a guest eats. With one dish of the category a guest gets
+    `total_per_guest`; every extra dish of the same category adds `extra_per_variety` of that
+    total, shared among the dishes. So 3 salads at 220 g and 15% → 220 × 1.3 / 3 = 95 g each,
+    and 8 salads → 220 × 2.05 / 8 = 56 g each. Kept in the business settings."""
+    measure: Measure
+    total_per_guest: float = Field(..., gt=0)
+    extra_per_variety: float = Field(0.0, ge=0, le=1)
+
+    def per_dish(self, dishes: int) -> float:
+        n = max(1, dishes)
+        return self.total_per_guest * (1 + self.extra_per_variety * (n - 1)) / n
+
+
+class Slot(BaseModel):
+    """A place in a package: choose `choose` dishes out of `options`, e.g. "3 salads out of
+    these 8". `per_guest`, when set, is a fixed amount of each chosen dish per guest (in the
+    dish category's measure) and the slot doesn't count towards variety (bread, drinks)."""
+    id: str = Field(..., min_length=1, max_length=40, pattern=r"^[\w-]+$")
+    label_he: str = Field(..., min_length=1, max_length=60)
+    choose: int = Field(1, ge=1, le=20)
+    options: list[str] = Field(..., min_length=1)
+    per_guest: float | None = Field(None, gt=0)
+    customer_choice: bool = Field(True, description="The customer may pick these in the link")
+
+
 class ItemRole(StrEnum):
     """What the pricing rules look for, instead of product codes. The business's own catalog
     says which of its items plays each role; nothing in code knows any item by name or SKU."""
@@ -63,7 +112,8 @@ class CostSource(StrEnum):
 
 
 class Component(BaseModel):
-    """A package ingredient: `quantity` units of `sku` for every `per_guests` guests."""
+    """Stage-1 package ingredient (fixed quantity per N guests). Superseded by `Slot`;
+    kept only so migration 003 can convert old data."""
     sku: str
     quantity: float = Field(1, gt=0)
     per_guests: int = Field(1, ge=1)
@@ -94,7 +144,16 @@ class CatalogItem(BaseModel):
     cost: float | None = Field(None, ge=0, description="Cost per unit before VAT")
     cost_updated_at: datetime | None = None
     cost_source: CostSource | None = None
-    components: list[Component] = Field(default_factory=list, description="Packages only")
+    components: list[Component] = Field(default_factory=list, description="Legacy, see Slot")
+    # units: how much one catalog unit yields, in the category's measure (grams or portions).
+    # E.g. a salad tray = 2000 g, a cake = 16 portions, a per-guest main = 1 portion.
+    yield_amount: float | None = Field(None, gt=0)
+    slots: list[Slot] = Field(default_factory=list, description="Packages only")
+
+    @computed_field
+    @property
+    def kind(self) -> ItemKind:
+        return KIND.get(self.category, ItemKind.food)
 
     @property
     def cost_group(self) -> CostGroup:

@@ -122,7 +122,29 @@ def test_migration_fills_catalog_fields_without_overwriting(tmp_path):
     migrations.run(tmp_path)
     w = cs.get("acme", "STF-WAITER")
     assert w.role == "waiter" and w.cost == 55 and w.price == 99
-    assert cs.get("acme", "PKG-MEAT-STD").components
+    assert cs.get("acme", "PKG-MEAT-STD").slots
+
+
+def test_migration_turns_old_components_into_slots(tmp_path):
+    """A package the business built itself in stage 1 keeps the same dishes as fixed slots."""
+    from app.catalog.service import CatalogService
+    cs = CatalogService(tmp_path)
+    cs.update("acme", "STF-WAITER", {"price": 99})
+    raw = migrations._read(tmp_path / "catalog.json")
+    raw["acme:MY-PKG"] = {**raw["acme:PKG-MEAT-STD"], "id": "acme:MY-PKG", "sku": "MY-PKG",
+                          "slots": [], "components": [
+                              {"sku": "SAL-ISR", "quantity": 1, "per_guests": 10},
+                              {"sku": "SAL-TABULE", "quantity": 1, "per_guests": 10},
+                              {"sku": "MAIN-SCHNITZEL", "quantity": 1, "per_guests": 1}]}
+    for it in raw.values():
+        it.pop("yield_amount", None)
+    migrations._write(tmp_path / "catalog.json", raw)
+    migrations.run(tmp_path)
+    mine = cs.get("acme", "MY-PKG")
+    assert [(sl.id, sl.choose, sl.options) for sl in mine.slots] == [
+        ("salad", 2, ["SAL-ISR", "SAL-TABULE"]), ("main", 1, ["MAIN-SCHNITZEL"])]
+    assert mine.components == []
+    assert cs.get("acme", "SAL-ISR").yield_amount == 2000  # filled from the base catalog
 
 
 def test_profit_report_counts_only_complete_costs(tmp_path):

@@ -4,8 +4,9 @@ Two steps, always: a preview (what will be added, what will change, and every er
 column), then apply. Apply writes only the valid rows and reports the skipped ones, so a sheet
 with a few bad rows doesn't block the rest. Headers may be in Hebrew or English.
 
-Sheets (xlsx): "פריטים" (items), optional "רכיבי חבילות" (package components).
-CSV: items only.
+Sheets (xlsx): "פריטים" (items), optional "חלקי חבילות" (package slots: one row per dish
+option; the slot's name, how many to choose etc. on its first row). A package that appears in
+that sheet gets exactly the slots listed. CSV: items only.
 """
 
 from __future__ import annotations
@@ -20,9 +21,10 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.worksheet.datavalidation import DataValidation
 from pydantic import BaseModel, Field, ValidationError
 
-from app.schemas.catalog import CatalogItem, Component, CostSource
+from app.schemas.catalog import CatalogItem, CostSource, Slot
+from app.services.packages import package_errors
 
-ITEMS_SHEET, COMP_SHEET = "פריטים", "רכיבי חבילות"
+ITEMS_SHEET, SLOT_SHEET, OLD_COMP_SHEET = "פריטים", "חלקי חבילות", "רכיבי חבילות"
 
 # column -> accepted headers (first is what the template writes)
 COLUMNS = {
@@ -35,13 +37,17 @@ COLUMNS = {
     "cost_source": ["מקור העלות", "cost_source"],
     "meal_type": ["סוג", "meal_type", "בשרי/חלבי/פרווה"],
     "serves": ["סועדים ליחידה", "serves"],
+    "yield_amount": ["תפוקה ליחידה (גרם/מנות)", "yield_amount", "תפוקה ליחידה", "תפוקה"],
     "active": ["פעיל", "active"],
 }
-COMP_COLUMNS = {
+SLOT_COLUMNS = {
     "package_sku": ["מק\"ט חבילה", "package_sku"],
-    "sku": ["מק\"ט רכיב", "component_sku", "sku"],
-    "quantity": ["כמות", "quantity"],
-    "per_guests": ["לכל כמה סועדים", "per_guests"],
+    "slot_id": ["מזהה חלק", "slot_id"],
+    "label": ["שם החלק", "label", "slot"],
+    "choose": ["כמה לבחור", "choose"],
+    "sku": ["מק\"ט מנה", "option_sku", "sku"],
+    "per_guest": ["כמות קבועה לסועד", "per_guest"],
+    "customer_choice": ["הלקוח בוחר", "customer_choice"],
 }
 CATEGORY_HE = {"חבילה": "package", "סלט": "salad", "ראשונה": "starter", "עיקרית": "main",
                "תוספת": "side", "קבלת פנים": "canape", "בוקר": "breakfast", "קינוח": "dessert",
@@ -188,6 +194,10 @@ def analyze(file_name: str, data: bytes, current: list[CatalogItem]
         serves = _num(rec.get("serves"), "סועדים ליחידה", errors, S, rn, "סועדים ליחידה")
         if serves is not None:
             patch["serves"] = int(serves) or None
+        yld = _num(rec.get("yield_amount"), "תפוקה ליחידה", errors, S, rn, "תפוקה ליחידה",
+                   positive=True)
+        if yld is not None:
+            patch["yield_amount"] = yld
         if "cost" in rec and rec.get("cost") is not None:
             cost = _num(rec["cost"], "עלות", errors, S, rn, "עלות")
             cur0 = by_sku.get(sku)
@@ -208,7 +218,7 @@ def analyze(file_name: str, data: bytes, current: list[CatalogItem]
         cur = by_sku.get(sku)
         is_pkg = (patch.get("category") or (cur.category.value if cur else "")) == "package"
         if "cost" in patch and is_pkg:
-            err("עלות", "עלות של חבילה מחושבת מהרכיבים (גיליון 'רכיבי חבילות'), לא מוזנת")
+            err("עלות", "עלות של חבילה מחושבת מהמנות שלה (גיליון 'חלקי חבילות'), לא מוזנת")
         if len(errors) > before:
             continue
         active = patch.pop("active", None)
@@ -236,37 +246,13 @@ def analyze(file_name: str, data: bytes, current: list[CatalogItem]
             by_sku[sku].cost_updated_at = datetime.now(UTC)
         touched[sku] = {"active": active}
 
-    # package components (replace the listed packages' components)
-    comp_rows = sheets.get(COMP_SHEET, [])
-    if comp_rows:
-        ch = _map_headers(comp_rows[0][1], COMP_COLUMNS)
-        new_comps: dict[str, list[Component]] = {}
-        for rn, vals in comp_rows[1:]:
-            rec = {key: _cell(vals[i]) if i < len(vals) else None for i, key in ch.items()}
-            if not any(v is not None for v in rec.values()):
-                continue
-            S = COMP_SHEET
-            pkg, part = str(rec.get("package_sku") or ""), str(rec.get("sku") or "")
-            qty = _num(rec.get("quantity") or 1, "כמות", errors, S, rn, "כמות", positive=True)
-            per = _num(rec.get("per_guests") or 1, "לכל כמה סועדים", errors, S, rn,
-                       "לכל כמה סועדים", positive=True)
-            if pkg not in by_sku or by_sku[pkg].category.value != "package":
-                errors.append(RowError(sheet=S, row=rn, column="מק\"ט חבילה",
-                                       message=f"{pkg or '(ריק)'} אינו חבילה בקטלוג"))
-                continue
-            if part not in by_sku:
-                errors.append(RowError(sheet=S, row=rn, column="מק\"ט רכיב",
-                                       message=f"הרכיב {part or '(ריק)'} לא קיים בקטלוג"))
-                continue
-            if qty is None or per is None:
-                continue
-            new_comps.setdefault(pkg, []).append(Component(sku=part, quantity=qty,
-                                                           per_guests=int(per)))
-        for pkg, comps in new_comps.items():
-            if comps != by_sku[pkg].components:
-                by_sku[pkg].components = comps
-                by_sku[pkg].cost_source = CostSource.components
-                touched.setdefault(pkg, {"active": None})
+    # package slots (replace the listed packages' slots)
+    if sheets.get(OLD_COMP_SHEET) and len(sheets[OLD_COMP_SHEET]) > 1:
+        errors.append(RowError(sheet=OLD_COMP_SHEET, row=1, column="", message=(
+            f"הגיליון '{OLD_COMP_SHEET}' הוחלף ב'{SLOT_SHEET}'. הורידו תבנית חדשה")))
+    slot_rows = sheets.get(SLOT_SHEET, [])
+    if slot_rows:
+        _read_slots(slot_rows, by_sku, touched, errors)
 
     creates, updates, unchanged = [], [], 0
     for sku, meta in touched.items():
@@ -276,7 +262,7 @@ def analyze(file_name: str, data: bytes, current: list[CatalogItem]
             continue
         diff = {f: [getattr(old, f), getattr(new, f)] for f in
                 ("name_he", "category", "unit", "price", "cost", "cost_source", "meal_type",
-                 "serves", "components") if getattr(old, f) != getattr(new, f)}
+                 "serves", "yield_amount", "slots") if getattr(old, f) != getattr(new, f)}
         if meta.get("active") is not None and meta["active"] != getattr(old, "active", True):
             diff["active"] = [getattr(old, "active", True), meta["active"]]
         diff = {k: [_plain(a), _plain(b)] for k, (a, b) in diff.items()}
@@ -288,6 +274,62 @@ def analyze(file_name: str, data: bytes, current: list[CatalogItem]
                           errors=errors)
     changed = [c.sku for c in creates] + [u.sku for u in updates]
     return report, [(by_sku[s], touched[s].get("active")) for s in changed]
+
+
+def _read_slots(slot_rows, by_sku: dict[str, CatalogItem], touched: dict, errors: list) -> None:
+    S = SLOT_SHEET
+    ch = _map_headers(slot_rows[0][1], SLOT_COLUMNS)
+    slots: dict[str, dict[str, dict]] = {}   # package -> slot id -> fields
+    first_row: dict[str, int] = {}
+    for rn, vals in slot_rows[1:]:
+        rec = {key: _cell(vals[i]) if i < len(vals) else None for i, key in ch.items()}
+        if not any(v is not None for v in rec.values()):
+            continue
+        pkg = str(rec.get("package_sku") or "").strip()
+        sid = str(rec.get("slot_id") or "").strip()
+        opt = str(rec.get("sku") or "").strip()
+        if pkg not in by_sku or by_sku[pkg].category.value != "package":
+            errors.append(RowError(sheet=S, row=rn, column="מק\"ט חבילה",
+                                   message=f"{pkg or '(ריק)'} אינו חבילה בתפריט"))
+            continue
+        if not sid or not opt:
+            errors.append(RowError(sheet=S, row=rn, column="מזהה חלק" if not sid else "מק\"ט מנה",
+                                   message="חסר מזהה חלק" if not sid else "חסר מק\"ט מנה"))
+            continue
+        first_row.setdefault(pkg, rn)
+        sl = slots.setdefault(pkg, {}).setdefault(sid, {"id": sid, "options": [], "row": rn})
+        sl["options"].append(opt)
+        if rec.get("label"):
+            sl["label_he"] = str(rec["label"])
+        if rec.get("choose") is not None:
+            n = _num(rec["choose"], "כמה לבחור", errors, S, rn, "כמה לבחור", positive=True)
+            if n is not None:
+                sl["choose"] = int(n)
+        if rec.get("per_guest") is not None:
+            pg = _num(rec["per_guest"], "כמות קבועה לסועד", errors, S, rn,
+                      "כמות קבועה לסועד", positive=True)
+            if pg is not None:
+                sl["per_guest"] = pg
+        if rec.get("customer_choice") is not None:
+            sl["customer_choice"] = str(rec["customer_choice"]).lower() not in NO
+    for pkg, by_id in slots.items():
+        try:
+            new = [Slot.model_validate({"label_he": d.get("label_he") or d["id"], **{
+                k: v for k, v in d.items() if k != "row"}}) for d in by_id.values()]
+        except ValidationError as e:
+            errors.append(RowError(sheet=S, row=first_row[pkg], column="",
+                                   message=f"{pkg}: {e.errors()[0]['msg']}"))
+            continue
+        draft = by_sku[pkg].model_copy(update={"slots": new})
+        errs = package_errors(draft, by_sku)
+        if errs:
+            errors.extend(RowError(sheet=S, row=first_row[pkg], column="", message=f"{pkg}: {m}")
+                          for m in errs)
+            continue
+        if new != by_sku[pkg].slots:
+            by_sku[pkg] = draft.model_copy(update={"cost_source": CostSource.components,
+                                                   "components": []})
+            touched.setdefault(pkg, {"active": None})
 
 
 def _plain(v):
@@ -323,7 +365,7 @@ def template_xlsx(current: list[CatalogItem]) -> bytes:
                    None if i.category.value == "package" else i.cost,
                    inv_s.get(i.cost_source.value) if i.cost_source and
                    i.cost_source.value != "components" else None,
-                   inv_m.get(i.meal_type.value, i.meal_type.value), i.serves,
+                   inv_m.get(i.meal_type.value, i.meal_type.value), i.serves, i.yield_amount,
                    "כן" if getattr(i, "active", True) else "לא"])
     bold, fill = Font(name="Arial", bold=True), PatternFill("solid", fgColor="FFF2CC")
     for c in ws[1]:
@@ -333,9 +375,11 @@ def template_xlsx(current: list[CatalogItem]) -> bytes:
             c.font = Font(name="Arial")
         row[5].fill = fill  # the column most businesses come to fill in: cost
     ws["F1"].comment = Comment("עלות ליחידה לפני מע\"מ, באותה יחידה כמו המחיר. ריק = לא ידוע. "
-                               "לחבילות משאירים ריק: העלות מחושבת מהרכיבים.", "זית ודבש")
-    widths = [16, 30, 12, 10, 18, 18, 12, 10, 12, 8]
-    for col, w in zip("ABCDEFGHIJ", widths, strict=True):
+                               "לחבילות משאירים ריק: העלות מחושבת מהמנות.", "זית ודבש")
+    ws["J1"].comment = Comment("כמה יחידה אחת נותנת: בגרם לסלטים ותוספות (מגש = 2000), "
+                               "במנות לשאר (עוגה = 16, מנה לסועד = 1). ריק = לא ידוע.", "זית ודבש")
+    widths = [16, 30, 12, 10, 18, 18, 12, 10, 12, 16, 8]
+    for col, w in zip("ABCDEFGHIJK", widths, strict=True):
         ws.column_dimensions[col].width = w
     for col, opts in (("C", CATEGORY_HE), ("D", UNIT_HE), ("H", MEAL_HE), ("G", SOURCE_HE)):
         dv = DataValidation(type="list", formula1='"' + ",".join(opts) + '"', allow_blank=True)
@@ -343,16 +387,22 @@ def template_xlsx(current: list[CatalogItem]) -> bytes:
         dv.add(f"{col}2:{col}2000")
     ws.freeze_panes = "B2"
 
-    cs = wb.create_sheet(COMP_SHEET)
+    cs = wb.create_sheet(SLOT_SHEET)
     cs.sheet_view.rightToLeft = True
-    cs.append([names[0] for names in COMP_COLUMNS.values()])
+    cs.append([names[0] for names in SLOT_COLUMNS.values()])
     for i in current:
-        for c in i.components:
-            cs.append([i.sku, c.sku, c.quantity, c.per_guests])
+        for sl in i.slots:
+            for n, opt in enumerate(sl.options):
+                first = n == 0
+                cs.append([i.sku, sl.id, sl.label_he if first else None,
+                           sl.choose if first else None, opt,
+                           sl.per_guest if first else None,
+                           ("כן" if sl.customer_choice else "לא") if first else None])
     for c in cs[1]:
         c.font = bold
-    for col in "ABCD":
-        cs.column_dimensions[col].width = 18
+    for col, w in zip("ABCDEFG", [18, 14, 18, 12, 20, 18, 12], strict=True):
+        cs.column_dimensions[col].width = w
+    cs.freeze_panes = "A2"
 
     lg = wb.create_sheet("הסבר")
     lg.sheet_view.rightToLeft = True
@@ -362,8 +412,13 @@ def template_xlsx(current: list[CatalogItem]) -> bytes:
         "עמודה מודגשת בצהוב (עלות): עלות ליחידה לפני מע\"מ.",
         "תא עלות ריק = לא ידוע, והמערכת תסמן 'עלות חסרה'.",
         "תא ריק בפריט קיים לא משנה את הערך הקיים.",
-        "חבילות: לא ממלאים עלות. בגיליון 'רכיבי חבילות' רושמים ממה החבילה בנויה, והעלות מחושבת.",
-        "  דוגמה: PKG-1 | SAL-1 | 1 | 10  =  מגש סלט אחד לכל 10 סועדים בחבילה.",
+        "תפוקה ליחידה: כמה יחידה אחת נותנת (גרם לסלטים ותוספות, מנות לשאר). ממנה מחושבים מגשים.",
+        "חבילות: לא ממלאים עלות. בגיליון 'חלקי חבילות' רושמים מאילו חלקים החבילה בנויה:",
+        "  שורה לכל מנה אפשרית. בשורה הראשונה של כל חלק: שם החלק וכמה לבחור.",
+        "  דוגמה: PKG-1 | salads | סלטים | 3 | SAL-1   ואחריה   PKG-1 | salads | | | SAL-2 ...",
+        "  = 'בוחרים 3 סלטים מתוך הרשימה'. כמות קבועה לסועד (למשל לחם 80 גרם) לא משתנה לפי גיוון.",
+        "  חבילה שמופיעה בגיליון מקבלת בדיוק את החלקים שרשומים לה.",
+        "כמה גרם/מנות מקבל כל סועד מכל קטגוריה, ומקדם הגיוון: בהגדרות, תחת 'מנות וכמויות'.",
         "קטגוריות: " + ", ".join(CATEGORY_HE),
         "יחידות: " + ", ".join(UNIT_HE) + "   סוג: " + ", ".join(MEAL_HE),
         "מקור העלות: " + ", ".join(SOURCE_HE),

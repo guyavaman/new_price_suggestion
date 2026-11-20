@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -91,6 +91,10 @@ export class ApiService {
     return this.http.post<ImportReport>(this.u(`/catalog/import${apply ? '?apply=true' : ''}`), fd);
   }
   importTemplate(): Observable<Blob> { return this.http.get(this.u('/catalog/import/template'), { responseType: 'blob' }); }
+  quoteMenu(id: string): Observable<OwnerMenu> { return this.http.get<OwnerMenu>(this.u(`/quotes/${id}/menu`)); }
+  setQuoteMenu(id: string, pkg: string, choice: Record<string, string[]>): Observable<OwnerMenu> { return this.http.put<OwnerMenu>(this.u(`/quotes/${id}/menu`), { package: pkg, choice }); }
+  dealMenu(id: string): Observable<DealMenu> { return this.http.get<DealMenu>(this.u(`/crm/deals/${id}/menu`)); }
+  choosePublicMenu(token: string, pkg: string, choice: Record<string, string[]>): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/menu`), { package: pkg, choice }); }
   quoteProfit(id: string): Observable<QuoteProfit> { return this.http.get<QuoteProfit>(this.u(`/quotes/${id}/profit`)); }
   profitReport(months = 6): Observable<ProfitReport> { return this.http.get<ProfitReport>(this.u(`/reports/profit?months=${months}`)); }
   settings(): Observable<BusinessSettings> { return this.http.get<BusinessSettings>(this.u('/settings')); }

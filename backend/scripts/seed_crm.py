@@ -11,6 +11,7 @@ import argparse
 import random
 from datetime import date, timedelta
 
+from app.business.settings import BusinessSettings
 from app.catalog.loader import load_catalog
 from app.crm.models import (
     Activity,
@@ -32,6 +33,7 @@ from app.repositories.quotes import JsonQuoteRepository, StatusChange
 from app.repositories.store import STORE_DIR
 from app.schemas.extraction import ContactInfo, ExtractedRequest
 from app.schemas.quote import QuoteStatus
+from app.services.event_menu import apply_choice, describe
 from app.services.pricing import PricingEngine
 from app.services.quotes import create_quote, standard_plan
 
@@ -56,6 +58,14 @@ SAMPLES = [
 ]
 
 # how long ago each booked deal was closed: some this month, some earlier (month KPIs)
+# dishes picked per event: by the customer in their link, or by the owner. One owner pick uses a
+# salad with no yield per unit, so that quote shows "חסרה תפוקה ליחידה" (missing data demo).
+MENU_CHOICES = {
+    "מיכל לוי": ("PKG-MEAT-STD", {"salads": ["SAL-TABULE", "SAL-HUMMUS", "SAL-MATBUCHA"],
+                                  "main": ["MAIN-KEBAB"]}, "customer"),
+    "אבי מזרחי": ("PKG-MEAT-STD", {"salads": ["SAL-ISR", "SAL-EGGPLANT", "SAL-CABBAGE"]},
+                  "owner"),
+}
 BOOKED_DAYS_AGO = {"נטע אברהם": 2, "דנה שפירא": 9, "עומר פרץ": 40, "גיא שמש": 55}
 
 CHAT = [
@@ -82,6 +92,8 @@ def seed(reset: bool = False) -> None:
     repo = JsonQuoteRepository()
     catalog = load_catalog()
     engine = PricingEngine(catalog)
+    rules = BusinessSettings(id=TENANT, tenant_id=TENANT)
+    by_sku = {i.sku: i for i in catalog}
     rnd = random.Random(7)
     today = date.today()
     for i, (name, phone, etype, days, guests, meal, kashrut, stage, ready, src) in enumerate(SAMPLES):
@@ -109,6 +121,11 @@ def seed(reset: bool = False) -> None:
                              f"פנייה של {c.name or c.company} ל{guests} אורחים")
             q.status = QUOTE_STATUS_FOR_STAGE[stage]
             q.history.append(StatusChange(status=q.status))
+            picked = MENU_CHOICES.get(name)
+            if picked:
+                pkg, choice, who = picked
+                errs = apply_choice(q, pkg, choice, by_sku, rules, by_customer=who == "customer")
+                assert not errs, errs
             repo.save(q)
             d.quote_ids = [q.id]
             d.set_value(q.tier().quote.total, q.tier().quote.net)
@@ -120,6 +137,12 @@ def seed(reset: bool = False) -> None:
             d = crm.save_deal(d)
             crm.log(TENANT, ActivityKind.quote, f"הצעת מחיר {q.number} נוצרה", Actor.system,
                     deal_id=d.id, meta={"quote_id": q.id})
+            if picked:
+                crm.log(TENANT, ActivityKind.note,
+                        ("הלקוח בחר מנות ב" if who == "customer" else "עודכנו מנות ב")
+                        + f"{by_sku[pkg].name_he}: {describe(by_sku[pkg], choice, by_sku)}",
+                        Actor.customer if who == "customer" else Actor.user, deal_id=d.id,
+                        meta={"quote_id": q.id, "menu_choice": pkg})
         if stage != "new":
             crm.move_stage(TENANT, d.id, DealStage(stage), Actor.agent if src == "web_chat"
                            else Actor.user, "המחיר גבוה מהתקציב" if stage == "lost" else None)

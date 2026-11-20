@@ -13,6 +13,23 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.repositories.store import STORE_DIR, Collection
+from app.schemas.catalog import Measure, PortionRule
+
+
+def _default_portions() -> dict[str, PortionRule]:
+    """Typical starting values; the business replaces them from Settings."""
+    g, u = Measure.g, Measure.unit
+    return {
+        "salad": PortionRule(measure=g, total_per_guest=220, extra_per_variety=0.15),
+        "side": PortionRule(measure=g, total_per_guest=200, extra_per_variety=0.2),
+        "starter": PortionRule(measure=u, total_per_guest=1, extra_per_variety=0.25),
+        "main": PortionRule(measure=u, total_per_guest=1, extra_per_variety=0.3),
+        "canape": PortionRule(measure=u, total_per_guest=4, extra_per_variety=0.15),
+        "breakfast": PortionRule(measure=u, total_per_guest=1, extra_per_variety=0.5),
+        "dessert": PortionRule(measure=u, total_per_guest=1, extra_per_variety=0.3),
+        "drink": PortionRule(measure=u, total_per_guest=1, extra_per_variety=1),
+        "bar": PortionRule(measure=u, total_per_guest=1, extra_per_variety=1),
+    }
 
 
 class VolumeDiscount(BaseModel):
@@ -36,6 +53,12 @@ class BusinessSettings(BaseModel):
                                 description="Minimum gross margin; below it the owner must approve")
     cost_alert_threshold: float = Field(0.05, ge=0, le=1,
                                         description="Cost increase that triggers the impact alert")
+    # portions (packages are broken down into dishes and quantities with these)
+    portion_rules: dict[str, PortionRule] = Field(default_factory=_default_portions)
+    reference_guests: int = Field(100, ge=1, le=5000,
+                                  description="Guest count for a package's cost in the menu")
+    menu_lock_days: int = Field(7, ge=0, le=90,
+                                description="Customer can change dishes until N days before")
     waiter_ratio: int = Field(15, ge=1, description="one waiter per N guests")
     bartender_ratio: int = Field(75, ge=1)
     head_waiter_from: int = Field(80, ge=1)

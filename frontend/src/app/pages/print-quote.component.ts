@@ -54,6 +54,11 @@ import { PublicQuote } from '../core/models';
               @for (i of t.items; track $index) { <tr><td>{{ i.name }}</td><td class="qty">{{ i.quantity }} {{ unit[i.unit] || i.unit }}</td></tr> }
             </tbody>
           </table>
+          @for (p of menuFor(t.name); track p.sku) {
+            <div class="menu"><b>התפריט ב{{ p.name_he }}:</b>
+              <ul>@for (s of p.slots; track s.id) { <li><span>{{ s.label_he }}:</span> {{ dishNames(s) }}</li> }</ul>
+            </div>
+          }
           @if (t.services.length) { <p class="svc"><b>כולל:</b> {{ t.services.join(' · ') }}</p> }
 
           <table class="sum">
@@ -94,6 +99,7 @@ import { PublicQuote } from '../core/models';
   styles: [`
     :host { display: block; background: #e9eae4; min-height: 100vh; padding: 16px 0 40px; }
     .toolbar { max-width: 210mm; margin: 0 auto 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .menu { margin: 8px 0; font-size: .92em; } .menu ul { margin: 4px 0 0; padding-inline-start: 18px; } .menu li span { color: #555; }
     .tiers { display: flex; gap: 4px; } .tiers button { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 5px 12px; cursor: pointer; font: inherit; }
     .tiers button.on { background: var(--olive); color: #fff; border-color: var(--olive); }
     .sheet { box-sizing: border-box; width: 210mm; min-height: 297mm; margin: 0 auto; background: #fff; color: #1d2318; padding: 16mm 15mm; box-shadow: 0 2px 16px rgba(0,0,0,.12); font-size: 11pt; line-height: 1.5; }
@@ -131,6 +137,10 @@ export class PrintQuoteComponent {
 
   tierKey = computed(() => this.picked() ?? this.tierParam() ?? this.q()?.selected_tier ?? 'recommended');
   tier = computed(() => this.q()?.tiers.find((t) => t.key === this.tierKey()));
+  menuFor(tierName: string) { return (this.q()?.menu ?? []).filter((p) => p.tiers.includes(tierName)); }
+  dishNames(s: { options: { sku: string; name_he: string }[]; chosen: string[] }) {
+    return s.chosen.map((c) => s.options.find((o) => o.sku === c)?.name_he ?? c).join(', ');
+  }
   others = computed(() => (this.q()?.tiers ?? []).filter((t) => t.key !== this.tierKey()));
   link = computed(() => `${location.origin}/q/${this.token()}`);
 

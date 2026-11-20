@@ -45,6 +45,7 @@ class KitchenItem(BaseModel):
     unit: str
     serves: int | None = None
     events: list[dict] = Field(default_factory=list)  # [{deal_id, title, quantity}]
+    problem: str | None = None  # quantity unknown for some event (e.g. no yield per unit)
 
 
 class KitchenEvent(BaseModel):
@@ -68,7 +69,12 @@ class KitchenSheet(BaseModel):
 
 
 def kitchen_sheet(crm: CrmService, repo, catalog: list[TenantCatalogItem], tenant: str,
-                  day: date) -> KitchenSheet:
+                  day: date, rules=None) -> KitchenSheet:
+    """What to make on a day. Packages are broken into their chosen dishes and quantities
+    (packages.py), so the kitchen sees "17 trays of Israeli salad", not "180 × package"."""
+    from app.business.settings import BusinessSettings  # late import
+    from app.services.packages import breakdown
+    rules = rules or BusinessSettings(id=tenant, tenant_id=tenant)
     by_sku = {i.sku: i for i in catalog}
     deals = sorted(crm.deals.list(tenant, lambda d: d.event_date == day and _booked(d)),
                    key=lambda d: d.title)
@@ -89,6 +95,23 @@ def kitchen_sheet(crm: CrmService, repo, catalog: list[TenantCatalogItem], tenan
                     continue
                 if cat == "equipment":
                     equipment.append(f"{ln.name_he} × {ln.quantity:g}")
+                    continue
+                if cat == "package" and item and item.slots:
+                    guests = int(ln.quantity) if item.unit.value == "per_guest" else (
+                        d.final_guest_count or d.guest_count or 0)
+                    b = breakdown(item, by_sku, guests, rules.portion_rules,
+                                  q.menu_choices.get(item.sku))
+                    for r in b.rows:
+                        dish = by_sku.get(r.sku)
+                        k = food.setdefault(r.sku, KitchenItem(
+                            sku=r.sku, name=r.name_he, category=r.category or "other",
+                            quantity=0, unit=UNIT_HE.get(r.unit, r.unit),
+                            serves=dish.serves if dish else None))
+                        k.quantity += r.units or 0
+                        if r.units is None:
+                            k.problem = r.problem
+                        k.events.append({"deal_id": d.id, "title": d.title,
+                                         "quantity": r.units, "package": item.name_he})
                     continue
                 k = food.setdefault(ln.sku, KitchenItem(
                     sku=ln.sku, name=ln.name_he, category=cat, quantity=0,

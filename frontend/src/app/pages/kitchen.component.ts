@@ -34,8 +34,8 @@ import { KitchenSheet } from '../core/models';
                 <tr>
                   <td><b>{{ f.name }}</b>@if (f.serves) { <small class="muted"> · מגש ל-{{ f.serves }}</small> }</td>
                   <td>{{ cat[f.category] || f.category }}</td>
-                  <td class="end num"><b>{{ f.quantity }}</b> {{ f.unit }}</td>
-                  <td class="small">@for (e of f.events; track e.deal_id) { <span>{{ short(e.title) }}: {{ e.quantity }}</span> }</td>
+                  <td class="end num"><b>{{ f.quantity }}</b> {{ f.unit }}@if (f.problem) { <span class="kprob" [title]="f.problem">+ חסר: {{ f.problem }}</span> }</td>
+                  <td class="small">@for (e of f.events; track e.deal_id + (e.package ?? '')) { <span>{{ short(e.title) }}: {{ e.quantity ?? '?' }}@if (e.package) { <i class="muted"> ({{ e.package }})</i> }</span> }</td>
                 </tr>
               }
             </tbody>
@@ -56,6 +56,7 @@ import { KitchenSheet } from '../core/models';
     }
   `,
   styles: [`
+    .kprob { display: block; font-size: .72rem; color: var(--warn); font-weight: 600; }
     .row { display: flex; gap: 6px; align-items: center; }
     .print-title { margin: 0 0 12px; }
     .end { text-align: end; } .small { font-size: .82rem; } .small span { display: inline-block; margin-inline-end: 10px; color: var(--muted); }

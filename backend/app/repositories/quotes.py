@@ -48,6 +48,8 @@ class StoredQuote(BaseModel):
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     history: list[StatusChange] = Field(default_factory=list)
+    # the event's dishes, per package: {package sku: {slot id: [dish skus]}}. Missing = defaults.
+    menu_choices: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
 
     def tier(self, key: str | None = None) -> TierQuote:
         key = key or self.selected_tier

@@ -151,9 +151,11 @@ class ProfitReport(BaseModel):
     events: list[EventProfit]
 
 
-def _event_profit(d: Deal, q, vat: float, by_sku: dict) -> EventProfit:
-    from app.services.costing import fill_missing, missing_parts, summarize  # late import
-    s = summarize(fill_missing(q.tier().quote, by_sku)) if q else None
+def _event_profit(d: Deal, q, rules, by_sku: dict) -> EventProfit:
+    from app.services.costing import fill_missing, missing_detail, summarize  # late import
+    vat = rules.vat_rate
+    priced = fill_missing(q.tier().quote, by_sku, rules, q.menu_choices) if q else None
+    s = summarize(priced) if q else None
     pkg = None
     if q:
         pkg = next((ln.name_he for ln in q.tier().quote.lines
@@ -163,10 +165,7 @@ def _event_profit(d: Deal, q, vat: float, by_sku: dict) -> EventProfit:
         deal_id=d.id, title=d.title, event_date=d.event_date, event_type=d.event_type,
         package=pkg, revenue=rev, cost=s.total_cost if s else None,
         profit=s.gross_profit if s else None, margin=s.margin if s else None,
-        missing=sorted({p for m in s.missing
-                        for p in (missing_parts(by_sku[m["sku"]], by_sku)
-                                  if m["sku"] in by_sku else [m["name"]]) or [m["name"]]})
-        if s else ["אין הצעת מחיר"])
+        missing=missing_detail(priced, by_sku, rules, q.menu_choices) if s else ["אין הצעת מחיר"])
 
 
 def _rows(events: list[EventProfit], key, label) -> list[ProfitRow]:
@@ -201,7 +200,7 @@ def profit_report(crm, repo, catalog, tenant: str, rules, today: date | None = N
     events = []
     for d in deals:
         q = next((quotes[qid] for qid in reversed(d.quote_ids) if qid in quotes), None)
-        e = _event_profit(d, q, rules.vat_rate, by_sku)
+        e = _event_profit(d, q, rules, by_sku)
         e_month = d.won_at.astimezone(tz).strftime("%Y-%m")
         events.append((e_month, e))
     first = today.replace(day=1)

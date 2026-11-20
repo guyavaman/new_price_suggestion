@@ -4,10 +4,12 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe } from '../core/format';
 import { CATEGORY, MEAL, UNIT } from '../core/labels';
-import { CatalogItem, ImpactRow, ImportReport } from '../core/models';
+import { CatalogItem, ImpactRow, ImportReport, ItemKind, Slot } from '../core/models';
 
 const SOURCE: Record<string, string> = { manual: 'ידני', supplier: 'ספק', recipe: 'מתכון', components: 'מהרכיבים' };
-const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגוריה', unit: 'יחידה', price: 'מחיר', cost: 'עלות', cost_source: 'מקור עלות', meal_type: 'סוג', serves: 'סועדים ליחידה', components: 'רכיבים', active: 'פעיל' };
+const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגוריה', unit: 'יחידה', price: 'מחיר', cost: 'עלות', cost_source: 'מקור עלות', meal_type: 'סוג', serves: 'סועדים ליחידה', yield_amount: 'תפוקה ליחידה', slots: 'חלקי החבילה', active: 'פעיל' };
+const KIND: [ItemKind, string][] = [['food', 'אוכל'], ['drink', 'שתייה'], ['package', 'חבילות'], ['equipment', 'ציוד'], ['staff', 'צוות'], ['logistics', 'לוגיסטיקה']];
+const KASHRUT_OK: Record<string, string[]> = { meat: ['meat', 'pareve'], dairy: ['dairy', 'pareve'], pareve: ['pareve'] };
 
 @Component({
   selector: 'app-menu',
@@ -67,6 +69,7 @@ const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגורי
         <input name="p" type="number" min="1" step="0.5" [(ngModel)]="nw.price" placeholder="מחיר ₪" aria-label="מחיר">
         <input name="k" type="number" min="0" step="0.5" [(ngModel)]="nw.cost" placeholder="עלות ₪ (אם ידועה)" aria-label="עלות">
         <input name="s" type="number" min="1" [(ngModel)]="nw.serves" placeholder="מספיק ל-X אורחים" aria-label="מספיק ל">
+        <input name="y" type="number" min="0" step="any" [(ngModel)]="nw.yield_amount" placeholder="תפוקה ליחידה (גרם/מנות)" aria-label="תפוקה ליחידה">
         <input name="d" [(ngModel)]="nw.description_he" placeholder="תיאור קצר" aria-label="תיאור" class="wide">
         <button class="btn" [disabled]="!nw.name_he || !nw.price">הוספה</button>
       </form>
@@ -97,24 +100,79 @@ const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגורי
 
     <div class="filters">
       <input type="search" placeholder="חיפוש" [ngModel]="q()" (ngModelChange)="q.set($event)" aria-label="חיפוש">
-      <button class="chip" [class.on]="!cat() && !onlyMissing()" (click)="cat.set(''); onlyMissing.set(false)">הכל</button>
-      <button class="chip miss" [class.on]="onlyMissing()" (click)="onlyMissing.set(!onlyMissing())">עלות חסרה ({{ missingCount() }})</button>
-      @for (c of usedCats(); track c) { <button class="chip" [class.on]="cat() === c" (click)="cat.set(c)">{{ catLabel[c] || c }}</button> }
+      <div class="chips" role="group" aria-label="סוג">
+        <button class="chip" [class.on]="!kind() && !onlyMissing()" (click)="kind.set(''); cat.set(''); onlyMissing.set(false)">הכל</button>
+        @for (k of kinds; track k[0]) {
+          @if (kindCount(k[0])) { <button class="chip" [class.on]="kind() === k[0]" (click)="kind.set(k[0]); cat.set('')">{{ k[1] }} <small>{{ kindCount(k[0]) }}</small></button> }
+        }
+        <button class="chip miss" [class.on]="onlyMissing()" (click)="onlyMissing.set(!onlyMissing())">חסרים נתונים ({{ missingCount() }})</button>
+      </div>
+      @if (subCats().length > 1) {
+        <div class="chips sub" role="group" aria-label="קטגוריה">
+          @for (c of subCats(); track c) { <button class="chip" [class.on]="cat() === c" (click)="cat.set(cat() === c ? '' : c)">{{ catLabel[c] || c }}</button> }
+        </div>
+      }
     </div>
+
+    @if (editing(); as pkg) {
+      <section class="card slots-ed" aria-labelledby="se-h" id="slot-editor">
+        <div class="impact-head"><h2 id="se-h">הרכב {{ pkg.name_he }}</h2><button class="linkish" (click)="editing.set(null)">סגירה</button></div>
+        <p class="muted small">כל חלק: כמה מנות בוחרים ומאיזו רשימה. הכמויות לסועד מחושבות לפי ההגדרות (כמויות וגיוון), או לפי כמות קבועה שתקבעו לחלק.
+          העלות של החבילה מחושבת מהמנות שנבחרו.</p>
+        @for (s of draftSlots(); track $index; let si = $index) {
+          <fieldset class="se-slot">
+            <legend class="sr">חלק {{ si + 1 }}</legend>
+            <div class="se-row">
+              <label>שם החלק<input [ngModel]="s.label_he" (ngModelChange)="patchSlot(si, { label_he: $event })" [name]="'l' + si" maxlength="60"></label>
+              <label class="n">כמה לבחור<input type="number" min="1" max="20" [ngModel]="s.choose" (ngModelChange)="patchSlot(si, { choose: +$event })" [name]="'c' + si"></label>
+              <label class="n">כמות קבועה לסועד<input type="number" min="0" step="any" [ngModel]="s.per_guest ?? ''" placeholder="לפי גיוון"
+                     (ngModelChange)="patchSlot(si, { per_guest: $event === '' || $event === null ? null : +$event })" [name]="'g' + si"></label>
+              <label class="cb"><input type="checkbox" [ngModel]="s.customer_choice" (ngModelChange)="patchSlot(si, { customer_choice: $event })" [name]="'k' + si"> הלקוח בוחר</label>
+              <button type="button" class="linkish bad" (click)="removeSlot(si)">מחיקת החלק</button>
+            </div>
+            <div class="chips">
+              @for (o of s.options; track o) {
+                <span class="opt">{{ nameOf(o) }}<button type="button" (click)="removeOption(si, o)" [attr.aria-label]="'הסרת ' + nameOf(o)">×</button></span>
+              }
+              <select [ngModel]="''" (ngModelChange)="addOption(si, $event)" [name]="'a' + si" aria-label="הוספת מנה">
+                <option value="">+ הוספת מנה</option>
+                @for (c of eligible(pkg); track c.sku) { @if (!s.options.includes(c.sku)) { <option [value]="c.sku">{{ c.name_he }} · {{ catLabel[c.category] }}</option> } }
+              </select>
+            </div>
+            @if (s.choose > s.options.length) { <p class="warn small">צריך לפחות {{ s.choose }} מנות ברשימה</p> }
+          </fieldset>
+        }
+        <div class="se-actions">
+          <button type="button" class="btn ghost" (click)="addSlot()">+ חלק</button>
+          <button type="button" class="btn" [disabled]="busy()" (click)="saveSlots(pkg)">שמירת ההרכב</button>
+        </div>
+        @if (slotErr()) { <p class="err" role="alert">{{ slotErr() }}</p> }
+      </section>
+    }
 
     <div class="card list">
       <table class="items">
-        <thead><tr><th>פריט</th><th>קטגוריה</th><th>יחידה</th><th>מחיר ₪</th><th>עלות ₪</th><th>רווח לפריט</th><th>זמין</th></tr></thead>
+        <thead><tr><th>פריט</th><th>קטגוריה</th><th>יחידה</th><th>תפוקה / הרכב</th><th>מחיר ₪</th><th>עלות ₪</th><th>רווח לפריט</th><th>זמין</th></tr></thead>
         <tbody>
           @for (i of shown(); track i.sku) {
             <tr [class.off]="!i.active">
               <td data-l="פריט"><b>{{ i.name_he }}</b><div class="muted small">{{ i.description_he }}</div></td>
               <td data-l="קטגוריה">{{ catLabel[i.category] || i.category }}</td>
               <td data-l="יחידה">{{ unitLabel[i.unit] }}@if (i.serves) { <small class="muted"> · ל-{{ i.serves }}</small> }</td>
+              <td data-l="תפוקה / הרכב" class="yield">
+                @if (isPackage(i)) {
+                  <button class="linkish" type="button" (click)="editSlots(i)">{{ i.slots?.length ? i.slots!.length + ' חלקים' : 'הגדרת הרכב' }}</button>
+                } @else if (i.kind === 'food' || i.kind === 'drink') {
+                  @if (i.measure) {
+                    <span class="yin"><input class="money" type="number" min="0" step="any" [value]="i.yield_amount ?? ''" placeholder="לא ידוע" [class.empty]="i.yield_amount == null"
+                           (change)="setYield(i, $any($event.target).value)" [attr.aria-label]="'תפוקה ליחידה ' + i.name_he"><small class="muted">{{ i.measure === 'g' ? 'גרם' : 'מנות' }}</small></span>
+                  } @else { <a class="muted small" routerLink="/settings">אין כלל כמויות לקטגוריה</a> }
+                } @else { <span class="muted">—</span> }
+              </td>
               <td data-l="מחיר"><input class="money" type="number" min="1" step="0.5" [value]="i.price" (change)="setPrice(i, $any($event.target).value)" [attr.aria-label]="'מחיר ' + i.name_he"></td>
               <td data-l="עלות" class="cost">
                 @if (isPackage(i)) {
-                  @if (i.unit_cost !== null && i.unit_cost !== undefined) { <span class="num">{{ i.unit_cost | ils: 1 }}</span><small class="muted">מחושב מ-{{ i.components?.length }} רכיבים</small> }
+                  @if (i.unit_cost !== null && i.unit_cost !== undefined) { <span class="num">{{ i.unit_cost | ils: 1 }}</span><small class="muted">לסועד, מהמנות (ל-{{ refGuests() }} סועדים)</small> }
                   @else { <span class="missing" [title]="'חסרה עלות: ' + (i.cost_missing ?? []).join(', ')">עלות חסרה</span><small class="muted">{{ (i.cost_missing ?? []).join(', ') }}</small> }
                 } @else {
                   <input class="money" type="number" min="0" step="0.5" [value]="i.cost ?? ''" placeholder="לא ידוע" [class.empty]="i.cost == null"
@@ -126,7 +184,7 @@ const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגורי
               <td data-l="רווח לפריט" class="num">@if (i.item_margin != null) { <span [class.low]="i.item_margin < floor()">{{ pct(i.item_margin) }}</span> } @else { <span class="muted">—</span> }</td>
               <td data-l="זמין"><label class="sw"><input type="checkbox" [checked]="i.active" (change)="toggle(i)" [attr.aria-label]="'זמין ' + i.name_he"> {{ i.active ? 'כן' : 'לא' }}</label></td>
             </tr>
-          } @empty { <tr><td colspan="7" class="muted">אין פריטים שמתאימים לסינון.</td></tr> }
+          } @empty { <tr><td colspan="8" class="muted">אין פריטים שמתאימים לסינון.</td></tr> }
         </tbody>
       </table>
     </div>
@@ -134,7 +192,22 @@ const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגורי
   styles: [`
     .head-actions { display: flex; gap: 8px; }
     .add { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; } .add .wide { flex: 1; min-width: 200px; }
-    .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+    .filters { display: grid; gap: 6px; margin-bottom: 10px; }
+    .filters .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    .filters .chips.sub .chip { font-size: .82rem; padding: 2px 10px; }
+    .chip small { opacity: .7; margin-inline-start: 3px; }
+    .yin { display: inline-flex; gap: 4px; align-items: center; }
+    .slots-ed { margin-bottom: 14px; display: grid; gap: 12px; }
+    .se-slot { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0; display: grid; gap: 8px; min-width: 0; }
+    .se-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+    .se-row label { display: grid; gap: 2px; font-size: .8rem; color: var(--muted); }
+    .se-row label.n input { width: 110px; }
+    .se-row label.cb { display: flex; gap: 6px; align-items: center; color: var(--ink); font-size: .88rem; padding-bottom: 6px; }
+    .opt { display: inline-flex; align-items: center; gap: 4px; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 3px 4px 3px 8px; font-size: .88rem; }
+    .opt button { border: 0; background: none; cursor: pointer; font-size: 1rem; line-height: 1; color: var(--muted); padding: 0 4px; }
+    .se-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .warn { color: var(--warn); margin: 0; }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
     .chip.on { background: var(--olive); color: #fff; border-color: var(--olive); }
     .chip.miss { border-color: var(--warn); color: var(--warn); } .chip.miss.on { background: var(--warn); color: #fff; }
     .money { width: 92px; font-variant-numeric: tabular-nums; }
@@ -164,7 +237,9 @@ const FIELD: Record<string, string> = { name_he: 'שם', category: 'קטגורי
 export class MenuComponent {
   private api = inject(ApiService);
   items = signal<CatalogItem[]>([]);
-  q = signal(''); cat = signal(''); onlyMissing = signal(false);
+  q = signal(''); cat = signal(''); kind = signal<ItemKind | ''>(''); onlyMissing = signal(false);
+  kinds = KIND; refGuests = signal(100);
+  editing = signal<CatalogItem | null>(null); draftSlots = signal<Slot[]>([]); slotErr = signal('');
   adding = signal(false); importing = signal(false); busy = signal(false);
   msg = signal(''); msgBad = signal(false);
   impact = signal<ImpactRow[]>([]); impactName = signal('');
@@ -175,15 +250,18 @@ export class MenuComponent {
   cats = Object.entries(CATEGORY).filter(([k]) => !['staff', 'logistics'].includes(k));
   units = Object.entries(UNIT); meals = Object.entries(MEAL);
   nw: Partial<CatalogItem> = { category: 'main', unit: 'per_guest', meal_type: 'meat', tags: [], description_he: '' };
-  usedCats = computed(() => [...new Set(this.items().map((i) => i.category))]);
-  missingCount = computed(() => this.items().filter((i) => i.active && i.unit_cost == null).length);
+  subCats = computed(() => this.kind() ? [...new Set(this.items().filter((i) => i.kind === this.kind()).map((i) => i.category))] : []);
+  kindCount = (k: ItemKind) => this.items().filter((i) => i.kind === k).length;
+  // missing data: no cost, or (food/drink) no yield per unit
+  private lacks = (i: CatalogItem) => i.unit_cost == null || ((i.kind === 'food' || i.kind === 'drink') && !!i.measure && i.yield_amount == null);
+  missingCount = computed(() => this.items().filter((i) => i.active && this.lacks(i)).length);
   shown = computed(() => this.items().filter((i) =>
-    (!this.cat() || i.category === this.cat()) && (!this.q() || i.name_he.includes(this.q()))
-    && (!this.onlyMissing() || i.unit_cost == null)));
+    (!this.kind() || i.kind === this.kind()) && (!this.cat() || i.category === this.cat())
+    && (!this.q() || i.name_he.includes(this.q())) && (!this.onlyMissing() || this.lacks(i))));
 
   constructor() {
     this.load();
-    this.api.settings().subscribe((s) => this.floor.set(s.profit_floor));
+    this.api.settings().subscribe((s) => { this.floor.set(s.profit_floor); this.refGuests.set(s.reference_guests ?? 100); });
   }
   load() { this.api.catalog().subscribe((i) => this.items.set(i)); }
   isPackage(i: CatalogItem) { return i.category === 'package'; }
@@ -207,6 +285,46 @@ export class MenuComponent {
       error: (e) => this.flash(e.error?.detail ?? 'העדכון נכשל', true),
     });
   }
+  setYield(i: CatalogItem, v: string) {
+    const y = v === '' ? null : +v;
+    if (y !== null && !(y > 0)) { this.flash('תפוקה חייבת להיות חיובית', true); return; }
+    this.api.patchItem(i.sku, { yield_amount: y }).subscribe({
+      next: (r) => { this.load(); this.flash(y === null ? `התפוקה של ${r.item.name_he} סומנה כלא ידועה` : `התפוקה של ${r.item.name_he} עודכנה`); },
+      error: (e) => this.flash(e.error?.detail ?? 'העדכון נכשל', true),
+    });
+  }
+
+  // ---- package slots ----
+  nameOf(sku: string) { return this.items().find((i) => i.sku === sku)?.name_he ?? sku; }
+  eligible(pkg: CatalogItem) {
+    const ok = KASHRUT_OK[pkg.meal_type] ?? [];
+    return this.items().filter((i) => (i.kind === 'food' || i.kind === 'drink') && ok.includes(i.meal_type))
+      .sort((a, b) => a.category.localeCompare(b.category) || a.name_he.localeCompare(b.name_he, 'he'));
+  }
+  editSlots(i: CatalogItem) {
+    this.editing.set(i); this.slotErr.set('');
+    this.draftSlots.set(structuredClone(i.slots ?? []));
+    setTimeout(() => document.getElementById('slot-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+  patchSlot(i: number, p: Partial<Slot>) { this.draftSlots.update((s) => s.map((x, j) => j === i ? { ...x, ...p } : x)); }
+  removeSlot(i: number) { this.draftSlots.update((s) => s.filter((_, j) => j !== i)); }
+  addSlot() {
+    const used = new Set(this.draftSlots().map((s) => s.id));
+    let n = this.draftSlots().length + 1; while (used.has('s' + n)) n++;
+    this.draftSlots.update((s) => [...s, { id: 's' + n, label_he: 'חלק חדש', choose: 1, options: [], per_guest: null, customer_choice: true }]);
+  }
+  addOption(i: number, sku: string) { if (sku) this.patchSlot(i, { options: [...this.draftSlots()[i].options, sku] }); }
+  removeOption(i: number, sku: string) { this.patchSlot(i, { options: this.draftSlots()[i].options.filter((o) => o !== sku) }); }
+  saveSlots(pkg: CatalogItem) {
+    const empty = this.draftSlots().find((s) => !s.options.length || !s.label_he.trim());
+    if (empty) { this.slotErr.set('בכל חלק צריך שם ולפחות מנה אחת'); return; }
+    this.busy.set(true); this.slotErr.set('');
+    this.api.patchItem(pkg.sku, { slots: this.draftSlots() }).subscribe({
+      next: (r) => { this.busy.set(false); this.editing.set(null); this.load(); this.flash(`ההרכב של ${r.item.name_he} נשמר`); },
+      error: (e) => { this.busy.set(false); this.slotErr.set(e.error?.detail ?? 'השמירה נכשלה'); },
+    });
+  }
+
   toggle(i: CatalogItem) {
     this.api.patchItem(i.sku, { active: !i.active }).subscribe((r) => { this.load(); this.flash(r.item.active ? `${r.item.name_he} זמין שוב` : `${r.item.name_he} לא יוצע ללקוחות`); });
   }
@@ -243,7 +361,7 @@ export class MenuComponent {
     });
   }
   fields(f: Record<string, [unknown, unknown]>) {
-    const show = (v: unknown) => v == null ? 'ריק' : Array.isArray(v) ? `${v.length} רכיבים` : String(v);
+    const show = (v: unknown) => v == null ? 'ריק' : Array.isArray(v) ? `${v.length} חלקים` : String(v);
     return Object.entries(f).map(([k, [a, b]]) => ({ k, label: FIELD[k] ?? k, from: show(a), to: show(b) }));
   }
 }

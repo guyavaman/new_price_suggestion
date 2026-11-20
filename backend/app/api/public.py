@@ -22,6 +22,11 @@ class DeclineIn(BaseModel):
     reason: str = Field(..., min_length=1, max_length=300)
 
 
+class MenuIn(BaseModel):
+    package: str = Field(..., min_length=1, max_length=60)
+    choice: dict[str, list[str]] = Field(..., max_length=20)
+
+
 class CountIn(BaseModel):
     guests: int = Field(..., ge=1, le=5000)
 
@@ -48,6 +53,13 @@ def accept(token: str, body: AcceptIn, portal: CustomerPortal = Depends(get_port
 @router.post("/quotes/{token}/guest-count", response_model=PublicQuote)
 def guest_count(token: str, body: CountIn, portal: CustomerPortal = Depends(get_portal)):
     return _run(portal.update_guest_count, token, body.guests)
+
+
+@router.post("/quotes/{token}/menu", response_model=PublicQuote)
+def choose_menu(token: str, body: MenuIn, portal: CustomerPortal = Depends(get_portal)):
+    if any(len(v) > 20 for v in body.choice.values()):
+        raise HTTPException(422, "יותר מדי מנות")
+    return _run(portal.choose_menu, token, body.package, body.choice)
 
 
 @router.get("/quotes/{token}/payments/{payment_id}")
