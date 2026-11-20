@@ -35,6 +35,7 @@ from app.deps import (
     get_purchasing,
     get_repo,
     get_settings_service,
+    get_team,
     get_tenant,
 )
 from app.integrations.config import TenantConfig
@@ -48,6 +49,8 @@ from app.services.event_menu import PackageMenu, owner_menu
 from app.services.packages import package_errors
 from app.services.pricing import STYLE_HE, PricingEngine
 from app.services.quotes import create_quote, standard_plan, tiers_for
+from app.team.planning import equipment_state, staff_plan
+from app.team.service import TeamService
 
 router = APIRouter(tags=["business"])
 
@@ -66,9 +69,11 @@ def profit(months: int = 6, t: TenantConfig = Depends(get_tenant),
 def today(t: TenantConfig = Depends(get_tenant), crm: CrmService = Depends(get_crm),
           repo=Depends(get_repo), svc: CatalogService = Depends(get_catalog_service),
           s: SettingsService = Depends(get_settings_service),
-          ps: PurchasingService = Depends(get_purchasing)):
+          ps: PurchasingService = Depends(get_purchasing),
+          team: TeamService = Depends(get_team)):
     """What could go wrong this week (with one-click actions), then leads and tasks."""
-    return today_view(crm, repo, svc.all(t.tenant_id), s.get(t.tenant_id), ps, t.tenant_id)
+    return today_view(crm, repo, svc.all(t.tenant_id), s.get(t.tenant_id), ps, t.tenant_id,
+                      team=team)
 
 
 # ---------- event readiness, late changes, quote from an event ----------
@@ -84,19 +89,24 @@ def _deal_or_404(crm: CrmService, tenant: str, deal_id: str) -> Deal:
 def get_readiness(deal_id: str, t: TenantConfig = Depends(get_tenant),
                   crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
                   svc: CatalogService = Depends(get_catalog_service),
-                  s: SettingsService = Depends(get_settings_service)):
+                  s: SettingsService = Depends(get_settings_service),
+                  team: TeamService = Depends(get_team)):
     d = _deal_or_404(crm, t.tenant_id, deal_id)
     rules = s.get(t.tenant_id)
     q = latest_quote(repo, d)
     msgs = customer_messages(d, q, crm.customers.get(t.tenant_id, d.customer_id), rules)
-    return readiness(d, q, svc.all(t.tenant_id), rules, msgs)
+    catalog = svc.all(t.tenant_id)
+    return readiness(d, q, catalog, rules, msgs,
+                     staff=staff_plan(team, d, q, catalog, rules),
+                     equipment=equipment_state(team, crm, d, q, catalog))
 
 
 @router.patch("/crm/deals/{deal_id}/readiness", response_model=Readiness, tags=["readiness"])
 def patch_readiness(deal_id: str, body: ReadinessPatch, t: TenantConfig = Depends(get_tenant),
                     crm: CrmService = Depends(get_crm), repo=Depends(get_repo),
                     svc: CatalogService = Depends(get_catalog_service),
-                    s: SettingsService = Depends(get_settings_service)):
+                    s: SettingsService = Depends(get_settings_service),
+                    team: TeamService = Depends(get_team)):
     """Venue, on-site contact, site conditions and the manual checklist marks."""
     d = _deal_or_404(crm, t.tenant_id, deal_id)
     data = body.model_dump(exclude_unset=True)
@@ -133,7 +143,7 @@ def patch_readiness(deal_id: str, body: ReadinessPatch, t: TenantConfig = Depend
         else:
             d.ready_marks.pop(key, None)
     crm.save_deal(d)
-    return get_readiness(deal_id, t, crm, repo, svc, s)
+    return get_readiness(deal_id, t, crm, repo, svc, s, team)
 
 
 @router.post("/crm/deals/{deal_id}/changes/{request_id}/{decision}",

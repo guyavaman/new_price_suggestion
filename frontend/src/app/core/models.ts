@@ -274,3 +274,15 @@ export interface PublicQuote {
 export interface ServiceChat { status: Conversation['status'] | null; messages: { role: 'user' | 'assistant'; text: string; by: string }[]; reply?: string | null; }
 
 export interface CustomerMessage { kind: string; label: string; text: string; recommended: boolean; whatsapp_url: string | null; }
+
+export type StaffRole = 'waiter' | 'head_waiter' | 'bartender' | 'chef';
+export interface StaffMember { id: string; name: string; phone: string; roles: StaffRole[]; hourly_rate: number | null; available_days: number[]; unavailable_dates: string[]; notes: string; active: boolean }
+export interface RoleNeed { role: StaffRole; label: string; needed: number; hours: number; assigned: number; confirmed: number; declined: number }
+export interface StaffAssignment { id: string; member_id: string; name: string; phone: string; role: StaffRole; status: 'invited' | 'confirmed' | 'declined'; planned_hours: number; actual_hours: number | null; rate: number | null; invite_url: string | null; responded_at: string | null }
+export interface DealStaff { needs: RoleNeed[]; assignments: StaffAssignment[]; ok: boolean; summary: string; candidates: Record<string, { id: string; name: string; phone: string }[]> }
+export interface PayRow { member_id: string; name: string; phone: string; rate: number | null; shifts: { deal_id: string; title: string; date: string; role: StaffRole; hours: number; actual: boolean }[]; hours: number; planned_only: number; total: number | null }
+export interface EquipmentType { code: string; name: string; owned: number; notes: string }
+export interface EquipmentLine { code: string; name: string; quantity: number; returned: number | null }
+export interface EquipmentState { lines: (EquipmentLine & { owned: number | null; short: number; missing: number })[]; packed: boolean; returned: boolean; shortages: string[]; missing: string[]; from_quote: boolean }
+export interface MissingReturn { deal_id: string; title: string; event_date: string; counted: boolean; items: { code: string; name: string; out: number; returned: number | null; missing: number }[] }
+export interface ShiftView { name: string; role: string; event: string; event_date: string | null; location: string | null; guests: number | null; hours: number; status: 'invited' | 'confirmed' | 'declined'; business_name: string }

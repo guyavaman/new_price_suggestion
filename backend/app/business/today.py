@@ -28,9 +28,10 @@ from app.business.settings import BusinessSettings
 from app.crm.models import Deal, DealStage
 from app.crm.service import CrmService
 from app.purchasing.service import PurchasingService
+from app.team.planning import equipment_state, missing_returns, staff_plan
 
 WATCH_DAYS = 7
-COVERED_TASK_KINDS = {"final_count", "balance", "change_request", "menu"}
+COVERED_TASK_KINDS = {"final_count", "balance", "change_request", "menu", "staff_declined"}
 WEEKDAY_HE = ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"]
 
 
@@ -82,7 +83,7 @@ def _when(d: datetime) -> str:
 
 def today_view(crm: CrmService, repo, catalog, rules: BusinessSettings, ps: PurchasingService,
                tenant: str, today: date | None = None,
-               now: datetime | None = None) -> TodayView:
+               now: datetime | None = None, team=None) -> TodayView:
     tz = ZoneInfo(rules.timezone)
     now = now or datetime.now(tz)
     today = today or now.date()
@@ -99,7 +100,11 @@ def today_view(crm: CrmService, repo, catalog, rules: BusinessSettings, ps: Purc
         q = _latest(repo, d)
         cust = crm.customers.get(tenant, d.customer_id)
         msgs = customer_messages(d, q, cust, rules, today)
-        r = readiness(d, q, catalog, rules, msgs, today)
+        extra = {}
+        if team is not None:
+            extra = {"staff": staff_plan(team, d, q, catalog, rules),
+                     "equipment": equipment_state(team, crm, d, q, catalog, today)}
+        r = readiness(d, q, catalog, rules, msgs, today, **extra)
         events.append({"id": d.id, "title": d.title, "event_date": d.event_date,
                        "guests": d.final_guest_count or d.guest_count, "done": r.done,
                        "total": r.total, "ready": r.ready})
@@ -145,6 +150,18 @@ def today_view(crm: CrmService, repo, catalog, rules: BusinessSettings, ps: Purc
                     meta={"supplier": o.code, "deliver_on": b.deliver_on.isoformat()}))
     except Exception:  # noqa: BLE001 — Today must open even if purchasing data is broken
         pass
+
+    # --- equipment that didn't come back, and staff who cancelled
+    if team is not None:
+        for m in missing_returns(team, crm, tenant, today):
+            what = ", ".join(f"{i['name']} ({i['missing']})" for i in m["items"][:4])
+            watch.append(WatchRow(
+                kind="equipment", key=m["deal_id"], deal_id=m["deal_id"], title=m["title"],
+                severity="normal", when=m["event_date"],
+                text=("ציוד שלא חזר: " + what) if m["counted"] else
+                "הציוד עוד לא נספר אחרי האירוע",
+                actions=[Action(kind="link", label="לספירת הציוד",
+                                url=f"/deals/{m['deal_id']}#equipment")]))
 
     # --- customer change requests waiting
     for d in deals:

@@ -101,7 +101,10 @@ def main() -> None:
 
 def seed(reset: bool = False) -> None:
     if reset:
-        for f in [*STORE_DIR.glob("crm_*.json"), STORE_DIR / "quotes.json"]:
+        for f in [*STORE_DIR.glob("crm_*.json"), STORE_DIR / "quotes.json",
+                  *(STORE_DIR / n for n in ("staff.json", "staff_assignments.json",
+                                            "equipment.json", "event_equipment.json",
+                                            "purchase_orders.json"))]:
             f.unlink(missing_ok=True)
     crm = CrmService()
     repo = JsonQuoteRepository()
@@ -230,7 +233,83 @@ def seed(reset: bool = False) -> None:
                                     text=rnd.choice(["מעדיפים הגשה למזנון", "שאלו על מגדל קינוחים",
                                                      "האולם מספק כלים", "צריך הגעה עד 17:00"]),
                                     actor=Actor.user))
+    seed_team(crm, repo, catalog)
     print(f"Seeded {len(SAMPLES)} deals for tenant '{TENANT}'.")
+
+
+STAFF = [  # name, phone, roles, rate, days (0=Mon … 6=Sun; None = every day)
+    ("יוסי אברג'ל", "050-7100001", ["head_waiter", "waiter"], 85, None),
+    ("מירב לוי", "050-7100002", ["head_waiter"], 85, [6, 0, 1, 2, 3]),
+    ("אורי בן חיים", "050-7100003", ["waiter"], 50, None),
+    ("נועה פרידמן", "050-7100004", ["waiter"], 50, [6, 0, 1, 2, 3]),
+    ("איתי שגיא", "050-7100005", ["waiter", "bartender"], 55, None),
+    ("שחר מזרחי", "050-7100006", ["waiter"], 50, [3, 4, 5, 6]),
+    ("רותם כץ", "050-7100007", ["waiter"], 50, None),
+    ("עדי גולן", "050-7100008", ["waiter"], 48, [6, 0, 1, 2, 3, 4]),
+    ("ליאור דהן", "050-7100009", ["waiter"], 50, None),
+    ("תמר אלון", "050-7100010", ["waiter"], None, None),          # no rate yet
+    ("בן עזרא", "050-7100011", ["bartender"], 60, [3, 4, 5]),
+    ("שף אלי חדד", "050-7100012", ["chef"], 150, None),
+    ("מאיה ששון", "050-7100013", ["waiter"], 50, None),
+    ("דור נחום", "050-7100014", ["waiter"], 50, None),
+]
+STOCK = [("EQP-TABLE-ROUND", "שולחן עגול ל-10", 20), ("EQP-TABLE-RECT", "שולחן מלבני", 30),
+         ("EQP-CHAIR", "כיסא אירועים", 200), ("EQP-CLOTH", "מפת שולחן בד", 60),
+         ("EQP-HEATERS", "חימום שאפינג", 25), ("EQP-DISH-PREM", "סט כלי הגשה פרימיום", 150),
+         ("TRAY", "מגש הגשה", 80), ("COOLER", "צידנית גדולה", 12), ("URN", "מיחם", 6)]
+# what goes out per event (code, quantity, returned); "packed" marks it ready
+EQUIPMENT = {
+    "דנה שפירא": ([("EQP-HEATERS", 14, None), ("TRAY", 40, None), ("COOLER", 6, None)], False),
+    "נטע אברהם": ([("EQP-HEATERS", 14, None), ("TRAY", 20, None), ("URN", 2, None)], False),
+    "גיא שמש": ([("EQP-HEATERS", 8, 6), ("TRAY", 25, 25), ("EQP-CHAIR", 70, 65)], True),
+}
+
+
+def seed_team(crm, repo, catalog) -> None:
+    """Staff, equipment stock, scheduling and equipment lists for the demo events."""
+    from app.business.settings import SettingsService
+    from app.team.models import EquipmentLine, EquipmentType, StaffMember
+    from app.team.planning import auto_assign, save_event_list
+    from app.team.service import TeamService
+    team = TeamService()
+    rules = SettingsService().get(TENANT)
+    for name, phone, roles, rate, days in STAFF:
+        team.members.put(StaffMember(tenant_id=TENANT, name=name, phone=phone, roles=roles,
+                                     hourly_rate=rate,
+                                     **({"available_days": days} if days else
+                                        {"available_days": list(range(7))})))
+    for code, name, owned in STOCK:
+        team.put_type(TENANT, EquipmentType(code=code, name=name, owned=owned))
+    names = {e.code: e.name for e in team.stock(TENANT)}
+    for d in crm.deals.list(TENANT):
+        cust = crm.customers.get(TENANT, d.customer_id)
+        who = cust.name if cust else ""
+        if who not in ("דנה שפירא", "עומר פרץ", "גיא שמש") or not d.quote_ids:
+            continue
+        q = repo.get(TENANT, d.quote_ids[-1])
+        new = auto_assign(team, crm, d, q, catalog, rules)
+        for i, a in enumerate(new):
+            if who == "דנה שפירא":   # most confirmed, one still waiting, one cancelled
+                a.status = "declined" if i == 1 else "invited" if i == 2 else "confirmed"
+            else:
+                a.status = "confirmed"
+            if who == "גיא שמש":     # past event: actual hours entered
+                a.actual_hours = a.planned_hours + (1 if i % 2 else 0.5)
+            team.assignments.put(a)
+        if who == "דנה שפירא" and len(new) > 1:
+            m = team.members.get(TENANT, new[1].member_id)
+            crm.add_task(TENANT, f"{m.name} ביטל/ה: לשבץ מלצר אחר", deal_id=d.id,
+                         priority="high", created_by=Actor.system, kind="staff_declined")
+    for d in crm.deals.list(TENANT):
+        cust = crm.customers.get(TENANT, d.customer_id)
+        plan = EQUIPMENT.get(cust.name if cust else "")
+        if not plan:
+            continue
+        lines, packed = plan
+        save_event_list(team, d, [EquipmentLine(code=c, name=names[c], quantity=n, returned=r)
+                                  for c, n, r in lines],
+                        packed=packed, returned=any(r is not None for _, _, r in lines) or None)
+
 
 
 if __name__ == "__main__":

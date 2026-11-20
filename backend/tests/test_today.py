@@ -15,6 +15,7 @@ from app.schemas.catalog import CatalogItem, ItemRole
 from app.schemas.extraction import ExtractedRequest
 from app.schemas.quote import MenuLine, MenuPlan
 from app.services.pricing import PricingEngine
+from app.team.service import TeamService
 from tests.test_business import TODAY, T, make_quote
 
 TZ = ZoneInfo("Asia/Jerusalem")
@@ -169,6 +170,7 @@ def test_api_readiness_style_quote_from_deal(env):
         deps.get_crm: lambda: env["crm"], deps.get_repo: lambda: env["repo"],
         deps.get_settings_service: lambda: env["settings"],
         deps.get_catalog_service: lambda: env["catalog"], deps.get_purchasing: lambda: ps,
+        deps.get_team: lambda: TeamService(env["tmp"]),
         deps.get_tenant_loader: lambda: (lambda tid: env["tenant"])})
     c, h = TestClient(app), {"X-Tenant-ID": T}
     try:
@@ -177,7 +179,8 @@ def test_api_readiness_style_quote_from_deal(env):
             "location": "אולם", "site_contact_name": "רונן", "site_contact_phone": "050",
             "site": {"electricity": True}, "marks": {"staff": True}}).json()
         items = {i["key"]: i for i in r["items"]}
-        assert items["location"]["ok"] and items["staff"]["ok"] and not items["site"]["ok"]
+        assert items["location"]["ok"] and not items["site"]["ok"]
+        assert not items["staff"]["ok"] and "חסרים" in items["staff"]["detail"]  # from scheduling
         before = env["crm"].deals.get(T, deal.id).value
         c.patch(f"/crm/deals/{deal.id}/readiness", headers=h, json={"service_style": "plated"})
         d = env["crm"].deals.get(T, deal.id)

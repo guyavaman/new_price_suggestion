@@ -21,6 +21,7 @@ from app.services.extraction import ExtractionService
 from app.services.menu import MenuPlanner
 from app.services.portal import CustomerPortal
 from app.services.pricing import PricingEngine
+from app.team.service import TeamService
 
 
 @lru_cache
@@ -36,6 +37,11 @@ def get_settings_service() -> SettingsService:
 @lru_cache
 def get_purchasing() -> PurchasingService:
     return PurchasingService()
+
+
+@lru_cache
+def get_team() -> TeamService:
+    return TeamService()
 
 
 def get_tenant_id(x_tenant_id: str = Header("demo")) -> str:

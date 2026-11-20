@@ -1,3 +1,5 @@
+import { EventEquipmentComponent } from '../core/event-equipment.component';
+import { EventStaffComponent } from '../core/event-staff.component';
 import { PackageMenuComponent } from '../core/package-menu.component';
 import { Component, computed, effect, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -10,7 +12,7 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
 @Component({
   selector: 'app-deal-detail',
   standalone: true,
-  imports: [RouterLink, FormsModule, IlsPipe, HeDatePipe, RelativePipe, PackageMenuComponent],
+  imports: [RouterLink, FormsModule, IlsPipe, HeDatePipe, RelativePipe, PackageMenuComponent, EventStaffComponent, EventEquipmentComponent],
   template: `
     <a routerLink="/events" class="back">→ כל האירועים</a>
     @if (error()) { <div class="err">{{ error() }}</div> }
@@ -157,6 +159,17 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
               </form>
             } @else { <p class="muted small">חשבונית מופקת אחרי שהאירוע נסגר</p> }
           </section>
+
+          @if (x.deal.stage === 'won' || x.deal.stage === 'completed') {
+            <section class="card" id="staff" aria-labelledby="st-h">
+              <div class="h"><h2 id="st-h">צוות לאירוע</h2><small class="muted">רק לך</small></div>
+              <app-event-staff [dealId]="x.deal.id" [past]="isPast(x.deal.event_date)" (changed)="refreshReady()" />
+            </section>
+            <section class="card" id="equipment" aria-labelledby="eq-h">
+              <div class="h"><h2 id="eq-h">ציוד לאירוע</h2></div>
+              <app-event-equipment [dealId]="x.deal.id" [past]="isPast(x.deal.event_date)" (changed)="refreshReady()" />
+            </section>
+          }
 
           @if (menu(); as m) {
             @if (m.packages.length) {
@@ -362,6 +375,8 @@ export class DealDetailComponent {
     this.api.patchReadiness(this.id(), { location: this.siteForm.location, site_contact_name: this.siteForm.site_contact_name,
       site_contact_phone: this.siteForm.site_contact_phone, site: this.siteForm.site }).subscribe(() => { this.siteOpen.set(false); this.load(); });
   }
+  isPast(d: string | null) { return !!d && d < new Date().toISOString().slice(0, 10); }
+  refreshReady() { this.api.readiness(this.id()).subscribe((r) => this.rd.set(r)); }
   markReady(key: string, on: boolean) { this.api.patchReadiness(this.id(), { marks: { [key]: on } }).subscribe(() => this.load()); }
   setStyle(style: string) { this.api.patchReadiness(this.id(), { service_style: style || null }).subscribe(() => this.load()); }
   decide(rid: string, d: 'approve' | 'decline') {

@@ -58,7 +58,9 @@ def _msg(msgs: list[CustomerMessage], kind: str, label: str) -> Action | None:
 
 def readiness(deal: Deal, q: StoredQuote | None, catalog: list[CatalogItem],
               rules: BusinessSettings, msgs: list[CustomerMessage],
-              today: date | None = None) -> Readiness:
+              today: date | None = None, staff=None, equipment=None) -> Readiness:
+    """`staff` (StaffPlan) and `equipment` (EquipmentState) come from the team module; without
+    them those two items fall back to the owner's manual marks."""
     today = today or date.today()
     items: list[ReadyItem] = []
     edit = Action(kind="edit", label="להשלים", target="site")
@@ -120,12 +122,29 @@ def readiness(deal: Deal, q: StoredQuote | None, catalog: list[CatalogItem],
         detail="שולם במלואו" if balance < 1 else f"נשארו ₪{balance:,.0f} מתוך ₪{total:,.0f}",
         action=None if balance < 1 else _msg(msgs, "balance", "תזכורת בוואטסאפ")))
 
-    # 6–7. staff and equipment (marked by the owner until stage 5)
+    # 6–7. staff and equipment
+    if staff is not None:
+        items.append(ReadyItem(
+            key="staff", label="צוות משובץ ומאושר", ok=staff.ok, detail=staff.summary,
+            action=None if staff.ok else Action(kind="link", label="לשיבוץ",
+                                                url=f"/deals/{deal.id}#staff")))
+    if equipment is not None:
+        has = bool(equipment.lines)
+        ok = (not has) or (equipment.packed and not equipment.shortages)
+        detail = ("אין ציוד לאירוע" if not has else
+                  "; ".join(equipment.shortages) if equipment.shortages else
+                  "הציוד נארז ונבדק" if equipment.packed else
+                  f"{len(equipment.lines)} סוגי ציוד, עוד לא נארזו")
+        items.append(ReadyItem(key="equipment", label="ציוד", ok=ok, detail=detail,
+                               action=None if ok else Action(kind="link", label="לרשימת הציוד",
+                                                            url=f"/deals/{deal.id}#equipment")))
     lines = q.tier().quote.lines if q else []
     by_sku = {i.sku: i for i in catalog}
     has_equipment = any(by_sku.get(ln.sku) and by_sku[ln.sku].category.value == "equipment"
                         for ln in lines)
     for key, label in MANUAL.items():
+        if (key == "staff" and staff is not None) or (key == "equipment" and equipment is not None):
+            continue
         if key == "equipment" and not has_equipment:
             items.append(ReadyItem(key=key, label="ציוד", ok=True, detail="אין ציוד בהזמנה"))
             continue

@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions, StaffMember, DealStaff, PayRow, EquipmentType, EquipmentLine, EquipmentState, MissingReturn, ShiftView } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -112,6 +112,34 @@ export class ApiService {
   decideChange(dealId: string, requestId: string, decision: 'approve' | 'decline'): Observable<unknown> { return this.http.post(this.u(`/crm/deals/${dealId}/changes/${requestId}/${decision}`), {}); }
   quoteFromDeal(dealId: string): Observable<{ quote_id: string; number: string }> { return this.http.post<{ quote_id: string; number: string }>(this.u(`/crm/deals/${dealId}/quote`), {}); }
   markOrder(supplier: string, deliver_on: string, ordered = true): Observable<void> { return this.http.post<void>(this.u('/purchasing/orders/mark'), { supplier, deliver_on, ordered }); }
+  staff(): Observable<StaffMember[]> { return this.http.get<StaffMember[]>(this.u('/staff')); }
+  addStaff(m: Partial<StaffMember>): Observable<StaffMember> { return this.http.post<StaffMember>(this.u('/staff'), m); }
+  putStaff(m: StaffMember): Observable<StaffMember> { return this.http.put<StaffMember>(this.u(`/staff/${m.id}`), m); }
+  deleteStaff(id: string): Observable<void> { return this.http.delete<void>(this.u(`/staff/${id}`)); }
+  dealStaff(dealId: string): Observable<DealStaff> { return this.http.get<DealStaff>(this.u(`/crm/deals/${dealId}/staff`)); }
+  autoStaff(dealId: string): Observable<DealStaff> { return this.http.post<DealStaff>(this.u(`/crm/deals/${dealId}/staff/auto`), {}); }
+  assignStaff(dealId: string, member_id: string, role: string): Observable<DealStaff> { return this.http.post<DealStaff>(this.u(`/crm/deals/${dealId}/staff`), { member_id, role }); }
+  patchAssignment(dealId: string, id: string, body: Partial<{ status: string; actual_hours: number | null; planned_hours: number }>): Observable<DealStaff> {
+    return this.http.patch<DealStaff>(this.u(`/crm/deals/${dealId}/staff/${id}`), body);
+  }
+  removeAssignment(dealId: string, id: string): Observable<DealStaff> { return this.http.delete<DealStaff>(this.u(`/crm/deals/${dealId}/staff/${id}`)); }
+  payroll(month: string): Observable<PayRow[]> { return this.http.get<PayRow[]>(this.u('/staff/payroll'), { params: { month } }); }
+  payrollXlsx(month: string): Observable<Blob> { return this.http.get(this.u('/staff/payroll.xlsx'), { params: { month }, responseType: 'blob' }); }
+  stock(): Observable<EquipmentType[]> { return this.http.get<EquipmentType[]>(this.u('/equipment')); }
+  putStock(e: EquipmentType): Observable<EquipmentType> { return this.http.put<EquipmentType>(this.u(`/equipment/${encodeURIComponent(e.code)}`), e); }
+  deleteStock(code: string): Observable<void> { return this.http.delete<void>(this.u(`/equipment/${encodeURIComponent(code)}`)); }
+  missingEquipment(): Observable<MissingReturn[]> { return this.http.get<MissingReturn[]>(this.u('/equipment/missing')); }
+  dealEquipment(dealId: string): Observable<EquipmentState> { return this.http.get<EquipmentState>(this.u(`/crm/deals/${dealId}/equipment`)); }
+  putDealEquipment(dealId: string, lines: EquipmentLine[], flags: { packed?: boolean; returned?: boolean } = {}): Observable<EquipmentState> {
+    return this.http.put<EquipmentState>(this.u(`/crm/deals/${dealId}/equipment`), { lines, ...flags });
+  }
+  teamTemplate(): Observable<Blob> { return this.http.get(this.u('/team/import/template'), { responseType: 'blob' }); }
+  importTeam(file: File, apply = false): Observable<ImportReport> {
+    const fd = new FormData(); fd.append('file', file);
+    return this.http.post<ImportReport>(this.u(`/team/import${apply ? '?apply=true' : ''}`), fd);
+  }
+  shift(token: string): Observable<ShiftView> { return this.http.get<ShiftView>(this.u(`/public/staff/${token}`)); }
+  answerShift(token: string, coming: boolean): Observable<ShiftView> { return this.http.post<ShiftView>(this.u(`/public/staff/${token}`), { coming }); }
   quoteMenu(id: string): Observable<OwnerMenu> { return this.http.get<OwnerMenu>(this.u(`/quotes/${id}/menu`)); }
   setQuoteMenu(id: string, pkg: string, choice: Record<string, string[]>): Observable<OwnerMenu> { return this.http.put<OwnerMenu>(this.u(`/quotes/${id}/menu`), { package: pkg, choice }); }
   dealMenu(id: string): Observable<DealMenu> { return this.http.get<DealMenu>(this.u(`/crm/deals/${id}/menu`)); }
