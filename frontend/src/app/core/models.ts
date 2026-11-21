@@ -255,6 +255,7 @@ export interface BusinessSettings {
   payment_provider: string; public_base_url: string; followup_after_days: number; final_count_days_before: number;
   invoice_provider: string; service_info: string; profit_floor: number; cost_alert_threshold: number; timezone?: string;
   portion_rules: Record<string, PortionRule>; reference_guests: number; menu_lock_days: number; delivery_buffer_days: number;
+  leftover_consumption: Record<string, number>; learning_min_events: number; learning_min_change: number; learning_window: number; closing_window_days: number;
   style_staffing: Record<string, { waiter_ratio: number; chef_ratio: number | null }>; guest_lock_days: number; late_guest_surcharge: number; late_decrease_charged: boolean;
   balance_reminder_days: number; automation_enabled: boolean; automation_hour: number; automation_last_run: string | null;
 }
@@ -286,3 +287,31 @@ export interface EquipmentLine { code: string; name: string; quantity: number; r
 export interface EquipmentState { lines: (EquipmentLine & { owned: number | null; short: number; missing: number })[]; packed: boolean; returned: boolean; shortages: string[]; missing: string[]; from_quote: boolean }
 export interface MissingReturn { deal_id: string; title: string; event_date: string; counted: boolean; items: { code: string; name: string; out: number; returned: number | null; missing: number }[] }
 export interface ShiftView { name: string; role: string; event: string; event_date: string | null; location: string | null; guests: number | null; hours: number; status: 'invited' | 'confirmed' | 'declined'; business_name: string }
+
+// stage 6: closing an event and learning from it
+export type Leftover = 'lot' | 'ok' | 'out';
+export interface DishOutcome { sku: string; name?: string; category?: string; leftover: Leftover | null }
+export interface EventClosing {
+  actual_guests: number | null; dishes: DishOutcome[]; purchasing_cost: number | null; staff_cost: number | null;
+  other_cost: number | null; notes: string; planned_guests?: number | null; closed_at?: string | null;
+}
+export interface PlannedDish { sku: string; name: string; category: string; units: number | null; unit: string; measure: 'g' | 'unit' | null; total_amount: number | null; leftover?: Leftover | null }
+export interface ClosingDishRow extends PlannedDish { per_guest_planned: number | null; per_guest_actual: number | null }
+export interface ClosingGroupRow { group: string; label: string; planned: number | null; actual: number | null; source: string }
+export interface ClosingStaffRow { role: string; label: string; needed: number; came: number | null; planned_hours: number; actual_hours: number | null }
+export interface ClosingReport {
+  closed: boolean; planned_guests: number | null; actual_guests: number | null; revenue: number;
+  planned_cost: number | null; actual_cost: number | null; planned_profit: number | null; actual_profit: number | null;
+  planned_margin: number | null; actual_margin: number | null; groups: ClosingGroupRow[]; dishes: ClosingDishRow[];
+  staff: ClosingStaffRow[]; staff_cost_from_hours: number | null; missing: string[]; notes: string;
+}
+export interface ClosingView {
+  closing: EventClosing | null; planned_guests: number | null; dishes: PlannedDish[]; planned_food_cost: number | null;
+  planned_staff_cost: number | null; staff_cost_from_hours: number | null; report: ClosingReport;
+}
+export interface PortionSuggestion {
+  category: string; label: string; measure: 'g' | 'unit'; current: number; suggested: number | null; change: number | null;
+  events: number; needed: number; marks: Record<Leftover, number>; reason: string;
+}
+export interface ClosedEvent { deal_id: string; title: string; event_date: string | null; planned_guests: number | null; actual_guests: number | null; planned_profit: number | null; actual_profit: number | null; actual_margin: number | null }
+export interface LearningView { suggestions: PortionSuggestion[]; events: ClosedEvent[]; to_close: { deal_id: string; title: string; event_date: string }[] }

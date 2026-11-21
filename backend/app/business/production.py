@@ -86,10 +86,14 @@ def _latest_quote(repo, deal: Deal):
 
 
 def production(crm: CrmService, repo, catalog: list[CatalogItem], rules: BusinessSettings,
-               tenant: str, start: date, end: date) -> Production:
+               tenant: str, start: date, end: date, deal_id: str | None = None
+               ) -> Production:
+    """What to make for booked events between start and end. With `deal_id`, that one event
+    only, whatever its stage (used after the event, when it's no longer "booked")."""
     by_sku = {i.sku: i for i in catalog}
     deals = sorted(crm.deals.list(tenant, lambda d: d.event_date is not None
-                                  and start <= d.event_date <= end and _booked(d)),
+                                  and start <= d.event_date <= end
+                                  and (d.id == deal_id if deal_id else _booked(d))),
                    key=lambda d: (d.event_date, d.title))
     lines: list[ProdLine] = []
     events: list[EventInfo] = []

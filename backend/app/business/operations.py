@@ -133,6 +133,9 @@ def run_automation(crm: CrmService, repo, rules: BusinessSettings, tenant: str,
                         "האירוע התקיים. חשבונית ובקשת ביקורת ממתינות", priority="high")
                 else:
                     act(d, "completed", "לבקש ביקורת מהלקוח", "האירוע התקיים")
+                if d.closing is None and "closing" not in d.automation:
+                    act(d, "closing", "למלא סיכום אירוע: אורחים בפועל, שאריות ועלויות",
+                        "סיכום האירוע ממתין (מתוכנן מול בפועל)", due_hours=24)
     return actions
 
 

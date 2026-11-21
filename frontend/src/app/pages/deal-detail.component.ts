@@ -1,3 +1,4 @@
+import { EventClosingComponent } from '../core/event-closing.component';
 import { EventEquipmentComponent } from '../core/event-equipment.component';
 import { EventStaffComponent } from '../core/event-staff.component';
 import { PackageMenuComponent } from '../core/package-menu.component';
@@ -12,7 +13,7 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
 @Component({
   selector: 'app-deal-detail',
   standalone: true,
-  imports: [RouterLink, FormsModule, IlsPipe, HeDatePipe, RelativePipe, PackageMenuComponent, EventStaffComponent, EventEquipmentComponent],
+  imports: [RouterLink, FormsModule, IlsPipe, HeDatePipe, RelativePipe, PackageMenuComponent, EventStaffComponent, EventEquipmentComponent, EventClosingComponent],
   template: `
     <a routerLink="/events" class="back">→ כל האירועים</a>
     @if (error()) { <div class="err">{{ error() }}</div> }
@@ -160,6 +161,12 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
             } @else { <p class="muted small">חשבונית מופקת אחרי שהאירוע נסגר</p> }
           </section>
 
+          @if ((x.deal.stage === 'won' || x.deal.stage === 'completed') && isPast(x.deal.event_date)) {
+            <section class="card" id="closing" aria-labelledby="cl-h">
+              <div class="h"><h2 id="cl-h">סיכום אירוע: מתוכנן מול בפועל</h2><small class="muted">רק לך</small></div>
+              <app-event-closing [dealId]="x.deal.id" />
+            </section>
+          }
           @if (x.deal.stage === 'won' || x.deal.stage === 'completed') {
             <section class="card" id="staff" aria-labelledby="st-h">
               <div class="h"><h2 id="st-h">צוות לאירוע</h2><small class="muted">רק לך</small></div>
@@ -251,6 +258,7 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
     }
   `,
   styles: [`
+    section.card { min-width: 0; }
     .ready { display: grid; gap: 10px; }
     .linkish { background: none; border: 0; padding: 0; color: var(--olive); text-decoration: underline; font: inherit; font-weight: 600; cursor: pointer; justify-self: start; }
     .ready .h { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -383,10 +391,18 @@ export class DealDetailComponent {
     this.api.decideChange(this.id(), rid, d).subscribe({ next: () => this.load(), error: (e) => this.error.set(e.error?.detail ?? 'הפעולה נכשלה') });
   }
 
+  /** Opened as /deals/ID#section (from Today or a report): scroll there once the cards exist. */
+  private toHash(tries = 0) {
+    const id = location.hash.slice(1);
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (el) { el.scrollIntoView({ block: 'start' }); return; }
+    if (tries < 20) setTimeout(() => this.toHash(tries + 1), 150);
+  }
   load(id = this.id()) {
     this.api.readiness(id).subscribe({ next: (r) => this.rd.set(r), error: () => this.rd.set(null) });
     this.api.dealMenu(id).subscribe({ next: (m) => this.menu.set(m), error: () => this.menu.set(null) });
-    this.api.deal(id).subscribe({ next: (x) => { this.x.set(x); this.fillSite(); }, error: () => this.error.set('האירוע לא נמצא או שהשרת לא זמין') });
+    this.api.deal(id).subscribe({ next: (x) => { const first = !this.x(); this.x.set(x); this.fillSite(); if (first) this.toHash(); }, error: () => this.error.set('האירוע לא נמצא או שהשרת לא זמין') });
     this.api.dealMessages(id).subscribe((ms) => {
       this.messages.set(ms);
       const keep = ms.find((m) => m.kind === this.pickedKind());

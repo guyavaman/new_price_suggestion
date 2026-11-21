@@ -11,7 +11,7 @@ from collections import Counter
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.crm.models import OPEN_STAGES, Deal, DealStage, now
 
@@ -141,6 +141,7 @@ class EventProfit(BaseModel):
     profit: float | None
     margin: float | None
     missing: list[str]
+    groups: list = Field(default_factory=list, exclude=True)  # GroupCost, for the closing report
 
 
 class ProfitReport(BaseModel):
@@ -165,7 +166,8 @@ def _event_profit(d: Deal, q, rules, by_sku: dict) -> EventProfit:
         deal_id=d.id, title=d.title, event_date=d.event_date, event_type=d.event_type,
         package=pkg, revenue=rev, cost=s.total_cost if s else None,
         profit=s.gross_profit if s else None, margin=s.margin if s else None,
-        missing=missing_detail(priced, by_sku, rules, q.menu_choices) if s else ["אין הצעת מחיר"])
+        missing=missing_detail(priced, by_sku, rules, q.menu_choices) if s else ["אין הצעת מחיר"],
+        groups=s.by_group if s else [])
 
 
 def _rows(events: list[EventProfit], key, label) -> list[ProfitRow]:

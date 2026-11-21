@@ -109,6 +109,29 @@ class ChangeRequest(BaseModel):
     price_note: str | None = None   # what the approval did to the price
 
 
+class DishOutcome(BaseModel):
+    """How much of one dish was left at the end of the event."""
+    sku: str
+    name: str = ""
+    category: str = ""
+    leftover: str | None = None     # "lot" (נשאר הרבה) | "ok" (סביר) | "out" (נגמר) | None
+
+
+class EventClosing(BaseModel):
+    """What actually happened, filled in after the event. Every field may stay empty: the
+    report compares only what was filled in. The planned side is snapshotted when saving, so
+    later changes to the portion rules don't rewrite history."""
+    actual_guests: int | None = Field(None, ge=0, le=20000)
+    dishes: list[DishOutcome] = Field(default_factory=list)
+    purchasing_cost: float | None = Field(None, ge=0, description="food and drink bought")
+    staff_cost: float | None = Field(None, ge=0, description="paid to staff")
+    other_cost: float | None = Field(None, ge=0, description="anything not planned")
+    notes: str = Field("", max_length=4000)
+    planned_guests: int | None = None
+    portion_snapshot: dict[str, float] = Field(default_factory=dict)  # category -> per guest
+    closed_at: datetime | None = None
+
+
 class Deal(BaseModel):
     id: str = Field(default_factory=_id)
     tenant_id: str
@@ -143,6 +166,7 @@ class Deal(BaseModel):
     ready_marks: dict[str, str] = Field(default_factory=dict,
                                         description="manual checklist item -> when marked done")
     change_requests: list[ChangeRequest] = Field(default_factory=list)
+    closing: EventClosing | None = None
     sent_messages: dict[str, str] = Field(default_factory=dict)  # message kind -> date sent
     owner: str | None = None
     lost_reason: str | None = None

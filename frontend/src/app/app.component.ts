@@ -55,7 +55,7 @@ export class AppComponent {
   isPublic = signal(false);
   main = [
     { path: '/today', label: 'היום' }, { path: '/inbox', label: 'פניות' }, { path: '/events', label: 'אירועים' }, { path: '/quotes', label: 'הצעות מחיר' },
-    { path: '/calendar', label: 'לוח שנה' }, { path: '/kitchen', label: 'מטבח' }, { path: '/purchasing', label: 'רכש' }, { path: '/team', label: 'צוות וציוד' }, { path: '/menu', label: 'תפריט ומחירים' },
+    { path: '/calendar', label: 'לוח שנה' }, { path: '/kitchen', label: 'מטבח' }, { path: '/purchasing', label: 'רכש' }, { path: '/team', label: 'צוות וציוד' }, { path: '/learning', label: 'סגירה ולמידה' }, { path: '/menu', label: 'תפריט ומחירים' },
     { path: '/settings', label: 'הגדרות' },
   ];
   more = [{ path: '/reports', label: 'דוחות' }, { path: '/customers', label: 'לקוחות' }, { path: '/chat', label: "צ'אט לקוח" }];

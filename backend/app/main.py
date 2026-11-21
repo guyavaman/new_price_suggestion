@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app import security
 from app.api import agent as agent_api
 from app.api import business as business_api
+from app.api import closing as closing_api
 from app.api import crm as crm_api
 from app.api import public as public_api
 from app.api import purchasing as purchasing_api
@@ -72,6 +73,7 @@ app.include_router(business_api.router)
 app.include_router(purchasing_api.router)
 app.include_router(team_api.router)
 app.include_router(team_api.public)
+app.include_router(closing_api.router)
 
 __all__ = ["get_crm", "get_public_tenant", "get_sales_agent", "get_tenant_loader"]
 
@@ -463,8 +465,8 @@ def _seed_demo() -> None:
         from scripts.seed_crm import seed
         seed(reset=True)
     elif os.environ.get("SEED_DEMO") == "1":
-        from scripts.seed_crm import seed_team_if_missing
-        seed_team_if_missing()
+        from scripts.seed_crm import backfill
+        backfill()
     from app.business.scheduler import start_background
     start_background(get_crm(), get_repo(), get_settings_service())
 

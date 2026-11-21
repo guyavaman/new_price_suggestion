@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import random
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from app.business.changes import request_change
 from app.business.settings import BusinessSettings
@@ -24,6 +24,8 @@ from app.crm.models import (
     ConversationStatus,
     Deal,
     DealStage,
+    DishOutcome,
+    EventClosing,
     Invoice,
     Payment,
     Source,
@@ -58,6 +60,22 @@ SAMPLES = [
     ("הדס יעקב", "0505656565", "birthday", 11, 40, "pareve", "kosher", "quoted", True, "web_chat"),
 ]
 
+# events that already happened, with a closing form each (stage 6: planned vs actual, learning)
+HISTORY = [
+    ("משפחת אורן", "0501010101", "bar_bat_mitzvah", -18, 110, "meat", "kosher", "completed", False, "phone"),
+    ("רחל דוד", "0502020202", "brit", -29, 50, "dairy", "kosher", "completed", False, "referral"),
+    ("Nova Systems Ltd", "0503030303", "corporate", -41, 80, "meat", "kosher", "completed", False, "email"),
+    ("תמר וייס", "0504040404", "birthday", -55, 45, "dairy", "kosher", "completed", False, "whatsapp"),
+]
+# per event: guests who came, leftover mark by category (default "ok"), purchasing vs plan, notes
+CLOSINGS = {
+    "משפחת אורן": (104, {"salad": "lot", "main": "out"}, 1.06, "הסלטים חזרו כמעט מלאים. השניצלים נגמרו מוקדם."),
+    "רחל דוד": (50, {"salad": "lot"}, 0.97, ""),
+    "Nova Systems Ltd": (72, {"salad": "lot", "main": "out", "dessert": "ok"}, 1.12, "הגיעו פחות ממה שאישרו."),
+    "תמר וייס": (45, {"salad": "ok", "main": "out"}, 1.0, ""),
+    "גיא שמש": (66, {"salad": "lot"}, 1.04, "חם מאוד, שתו הרבה."),
+}
+
 # how long ago each booked deal was closed: some this month, some earlier (month KPIs)
 # dishes picked per event: by the customer in their link, or by the owner. One owner pick uses a
 # salad with no yield per unit, so that quote shows "חסרה תפוקה ליחידה" (missing data demo).
@@ -81,7 +99,8 @@ READY = {
     "נטע אברהם": {"location": None, "contact": None, "site": {}, "final": False, "paid": False,
                   "marks": [], "menu": False, "change": 72},
 }
-BOOKED_DAYS_AGO = {"נטע אברהם": 2, "דנה שפירא": 9, "עומר פרץ": 40, "גיא שמש": 55}
+BOOKED_DAYS_AGO = {"נטע אברהם": 2, "דנה שפירא": 9, "עומר פרץ": 40, "גיא שמש": 55,
+                   "משפחת אורן": 70, "רחל דוד": 60, "Nova Systems Ltd": 95, "תמר וייס": 100}
 
 CHAT = [
     ("user", "היי, אני מתכננת בר מצווה לבן שלי, בערך 120 איש"),
@@ -109,12 +128,20 @@ def seed(reset: bool = False) -> None:
     crm = CrmService()
     repo = JsonQuoteRepository()
     catalog = load_catalog()
+    _add_samples(crm, repo, catalog, SAMPLES + HISTORY)
+    seed_team(crm, repo, catalog)
+    seed_closings(crm, repo, catalog)
+    print(f"Seeded {len(SAMPLES)} deals for tenant '{TENANT}'.")
+
+
+def _add_samples(crm, repo, catalog, samples) -> None:
+    """Customers, deals, quotes and chats for each sample row."""
     engine = PricingEngine(catalog)
     rules = BusinessSettings(id=TENANT, tenant_id=TENANT)
     by_sku = {i.sku: i for i in catalog}
     rnd = random.Random(7)
     today = date.today()
-    for i, (name, phone, etype, days, guests, meal, kashrut, stage, ready, src) in enumerate(SAMPLES):
+    for i, (name, phone, etype, days, guests, meal, kashrut, stage, ready, src) in enumerate(samples):
         value = None
         company = name if "Ltd" in name else None
         c = crm.upsert_customer(TENANT, name=None if company else name, phone=phone,
@@ -233,8 +260,6 @@ def seed(reset: bool = False) -> None:
                                     text=rnd.choice(["מעדיפים הגשה למזנון", "שאלו על מגדל קינוחים",
                                                      "האולם מספק כלים", "צריך הגעה עד 17:00"]),
                                     actor=Actor.user))
-    seed_team(crm, repo, catalog)
-    print(f"Seeded {len(SAMPLES)} deals for tenant '{TENANT}'.")
 
 
 STAFF = [  # name, phone, roles, rate, days (0=Mon … 6=Sun; None = every day)
@@ -265,16 +290,55 @@ EQUIPMENT = {
 }
 
 
-def seed_team_if_missing() -> bool:
-    """For a demo business seeded before staff existed: add staff and equipment only, and only
-    when the demo customers are there and nobody has been added yet (never touches real data)."""
+def backfill() -> list[str]:
+    """For a demo business seeded before a later stage: add only what that stage brought, once,
+    and only when the demo customers are there (never touches a real business's data)."""
     from app.team.service import TeamService
     crm = CrmService()
-    names = {c.name for c in crm.customers.list(TENANT)}
-    if not {"דנה שפירא", "גיא שמש"} <= names or TeamService().staff(TENANT):
-        return False
-    seed_team(crm, JsonQuoteRepository(), load_catalog())
-    return True
+    names = {c.name or c.company for c in crm.customers.list(TENANT)}
+    if not {"דנה שפירא", "גיא שמש"} <= names:
+        return []
+    repo, catalog, done = JsonQuoteRepository(), load_catalog(), []
+    if not TeamService().staff(TENANT):
+        seed_team(crm, repo, catalog)
+        done.append("team")
+    new = [h for h in HISTORY if h[0] not in names]
+    if new and not any(d.closing for d in crm.deals.list(TENANT)):
+        _add_samples(crm, repo, catalog, new)
+        seed_closings(crm, repo, catalog)
+        done.append("closings")
+    return done
+
+
+def seed_team_if_missing() -> bool:
+    return "team" in backfill()
+
+
+def seed_closings(crm, repo, catalog) -> None:
+    """A closing form for each past demo event (planned vs actual, and learning data)."""
+    from app.business import closing
+    from app.business.settings import SettingsService
+    from app.team.service import TeamService
+    rules = SettingsService().get(TENANT)
+    team = TeamService()
+    for d in crm.deals.list(TENANT):
+        cust = crm.customers.get(TENANT, d.customer_id)
+        plan = CLOSINGS.get((cust.name or cust.company) if cust else "")
+        if not plan or d.closing:
+            continue
+        came, marks, spend, notes = plan
+        dishes = closing.planned_dishes(crm, repo, catalog, rules, d)
+        report = closing.report(d, closing._latest(repo, d), catalog, rules, dishes, team)
+        food = next((g.planned for g in report.groups if g.group == "food"), None)
+        body = EventClosing(
+            actual_guests=came, notes=notes,
+            purchasing_cost=round(food * spend) if food else None,
+            dishes=[DishOutcome(sku=x.sku, leftover=marks.get(x.category, "ok"))
+                    for x in dishes if x.category in rules.portion_rules])
+        d.closing = closing.save(d, body, rules, dishes)
+        d.closing.closed_at = datetime.combine(d.event_date + timedelta(days=1),
+                                               datetime.min.time(), tzinfo=UTC)
+        crm.save_deal(d)
 
 
 def seed_team(crm, repo, catalog) -> None:

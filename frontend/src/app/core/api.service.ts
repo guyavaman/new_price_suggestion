@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions, StaffMember, DealStaff, PayRow, EquipmentType, EquipmentLine, EquipmentState, MissingReturn, ShiftView } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions, StaffMember, DealStaff, PayRow, EquipmentType, EquipmentLine, EquipmentState, MissingReturn, ShiftView, ClosingView, EventClosing, LearningView, PortionSuggestion } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -137,6 +137,12 @@ export class ApiService {
   importTeam(file: File, apply = false): Observable<ImportReport> {
     const fd = new FormData(); fd.append('file', file);
     return this.http.post<ImportReport>(this.u(`/team/import${apply ? '?apply=true' : ''}`), fd);
+  }
+  closing(dealId: string): Observable<ClosingView> { return this.http.get<ClosingView>(this.u(`/crm/deals/${dealId}/closing`)); }
+  saveClosing(dealId: string, body: EventClosing): Observable<ClosingView> { return this.http.put<ClosingView>(this.u(`/crm/deals/${dealId}/closing`), body); }
+  learning(): Observable<LearningView> { return this.http.get<LearningView>(this.u('/closing/learning')); }
+  applyPortion(category: string, total_per_guest: number): Observable<PortionSuggestion> {
+    return this.http.post<PortionSuggestion>(this.u('/closing/learning/apply'), { category, total_per_guest });
   }
   shift(token: string): Observable<ShiftView> { return this.http.get<ShiftView>(this.u(`/public/staff/${token}`)); }
   answerShift(token: string, coming: boolean): Observable<ShiftView> { return this.http.post<ShiftView>(this.u(`/public/staff/${token}`), { coming }); }

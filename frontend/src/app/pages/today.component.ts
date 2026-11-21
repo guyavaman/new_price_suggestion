@@ -46,7 +46,7 @@ interface EventGroup { deal_id: string; title: string; when: string | null; rows
                     @for (a of mainActions(r); track a.label) {
                       @switch (a.kind) {
                         @case ('whatsapp') { <a class="btn sm" [href]="a.url" target="_blank" rel="noopener" (click)="sent(r)">{{ a.label }}</a> }
-                        @case ('link') { <a class="btn ghost sm" [routerLink]="a.url">{{ a.label }}</a> }
+                        @case ('link') { <a class="btn ghost sm" [routerLink]="path(a.url)" [fragment]="frag(a.url)">{{ a.label }}</a> }
                         @case ('edit') { <a class="btn ghost sm" [routerLink]="['/deals', r.deal_id]" fragment="readiness">{{ a.label }}</a> }
                         @case ('mark') { <button class="btn ghost sm" type="button" [disabled]="busy()" (click)="mark(r)">{{ a.label }}</button> }
                         @case ('approve') {
@@ -222,6 +222,8 @@ export class TodayComponent {
   constructor() { this.load(); }
   load() { this.api.today().subscribe({ next: (v) => this.v.set(v), error: () => this.error.set('השרת לא זמין כרגע. נסו לרענן בעוד רגע.') }); }
   flash(m: string, bad = false) { this.msg.set(m); this.msgBad.set(bad); setTimeout(() => this.msg.set(''), 3500); }
+  path(u?: string | null) { return (u ?? '').split('#')[0]; }
+  frag(u?: string | null) { return (u ?? '').split('#')[1] || undefined; }
   mainActions(r: WatchRow): UiAction[] { return r.actions.filter((a) => !(a.kind === 'link' && a.label === 'לאירוע')); }
   done(id: string) { this.api.doneTask(id).subscribe(() => this.load()); }
   sent(r: WatchRow) { this.flash('ההודעה נפתחה בוואטסאפ'); void r; }

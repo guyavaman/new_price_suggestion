@@ -79,6 +79,17 @@ class BusinessSettings(BaseModel):
                                         description="Extra on guests added after the lock")
     late_decrease_charged: bool = Field(True, description="Fewer guests after the lock are "
                                                           "still charged for the locked count")
+    # closing and learning
+    leftover_consumption: dict[str, float] = Field(
+        default_factory=lambda: {"lot": 0.75, "ok": 1.0, "out": 1.1},
+        description="share of what was made that guests ate: a lot left / reasonable / ran out")
+    learning_min_events: int = Field(3, ge=1, le=50,
+                                     description="closed events needed before suggesting")
+    learning_min_change: float = Field(0.05, ge=0, le=1,
+                                       description="suggest only a change of at least this share")
+    learning_window: int = Field(10, ge=1, le=100, description="use the last N closed events")
+    closing_window_days: int = Field(14, ge=1, le=90,
+                                     description="ask to close an event up to N days after it")
     # purchasing
     delivery_buffer_days: int = Field(1, ge=0, le=7,
                                       description="Ingredients arrive N days before they're used")

@@ -31,7 +31,8 @@ from app.purchasing.service import PurchasingService
 from app.team.planning import equipment_state, missing_returns, staff_plan
 
 WATCH_DAYS = 7
-COVERED_TASK_KINDS = {"final_count", "balance", "change_request", "menu", "staff_declined"}
+COVERED_TASK_KINDS = {"final_count", "balance", "change_request", "menu", "staff_declined",
+                      "closing"}
 WEEKDAY_HE = ["שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת", "ראשון"]
 
 
@@ -162,6 +163,17 @@ def today_view(crm: CrmService, repo, catalog, rules: BusinessSettings, ps: Purc
                 "הציוד עוד לא נספר אחרי האירוע",
                 actions=[Action(kind="link", label="לספירת הציוד",
                                 url=f"/deals/{m['deal_id']}#equipment")]))
+
+    # --- events that happened and weren't summed up yet (planned vs actual needs the form)
+    for d in deals:
+        if (d.stage in (DealStage.won, DealStage.completed) and d.event_date and d.closing is None
+                and today - timedelta(days=rules.closing_window_days) <= d.event_date < today):
+            watch.append(WatchRow(
+                kind="closing", key="closing", deal_id=d.id, title=d.title, severity="normal",
+                when=d.event_date,
+                text="סיכום אירוע: כמה הגיעו, מה נשאר, כמה עלה בפועל (שתי דקות)",
+                actions=[Action(kind="link", label="למילוי הסיכום",
+                                url=f"/deals/{d.id}#closing")]))
 
     # --- customer change requests waiting
     for d in deals:

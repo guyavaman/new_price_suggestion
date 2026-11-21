@@ -92,6 +92,22 @@ const PORTIONED = ['salad', 'starter', 'main', 'side', 'canape', 'breakfast', 'd
             <label>חומרי גלם מגיעים (ימים לפני ההכנה)<input name="db" type="number" min="0" max="7" [(ngModel)]="s.delivery_buffer_days"></label>
           </div>
         </section>
+        <section class="card" aria-labelledby="ln-h">
+          <h2 id="ln-h">סגירת אירוע ולמידה</h2>
+          <p class="muted">אחרי כל אירוע מסמנים כמה נשאר מכל מנה. מזה המערכת מציעה כמות בסיס חדשה לסועד, ולא משנה אותה בלי אישור שלך.</p>
+          <h3>כמה מהכמות נאכל, לפי הסימון</h3>
+          <div class="fields">
+            <label>"נשאר הרבה" (%)<input name="lcl" type="number" min="10" max="100" [ngModel]="pct(s.leftover_consumption['lot'])" (ngModelChange)="s.leftover_consumption['lot'] = $event / 100"></label>
+            <label>"סביר" (%)<input name="lco" type="number" min="50" max="150" [ngModel]="pct(s.leftover_consumption['ok'])" (ngModelChange)="s.leftover_consumption['ok'] = $event / 100"></label>
+            <label>"נגמר" (%)<input name="lcx" type="number" min="100" max="200" [ngModel]="pct(s.leftover_consumption['out'])" (ngModelChange)="s.leftover_consumption['out'] = $event / 100"></label>
+          </div>
+          <div class="fields">
+            <label>להציע רק אחרי (אירועים עם סיכום)<input name="lme" type="number" min="1" max="50" [(ngModel)]="s.learning_min_events"></label>
+            <label>להציע רק שינוי של לפחות (%)<input name="lmc" type="number" min="0" max="100" [ngModel]="pct(s.learning_min_change)" (ngModelChange)="s.learning_min_change = $event / 100"></label>
+            <label>לפי האירועים האחרונים (כמה)<input name="lw" type="number" min="1" max="100" [(ngModel)]="s.learning_window"></label>
+            <label>לבקש סיכום עד (ימים אחרי האירוע)<input name="cwd" type="number" min="1" max="90" [(ngModel)]="s.closing_window_days"></label>
+          </div>
+        </section>
         <section class="card" aria-labelledby="st-h">
           <h2 id="st-h">סגנון הגשה, נעילה ושינויים מאוחרים</h2>
           <h3>מלצרים לפי סגנון הגשה</h3>
