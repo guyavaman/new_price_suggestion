@@ -239,3 +239,20 @@ def test_today_lists_equipment_that_did_not_come_back(env, team):
     row = next(w for w in tv.watch if w.kind == "equipment")
     assert "מחממים (1)" in row.text
     assert TODAY  # fixture date in use
+
+
+def test_demo_staff_backfill_only_for_the_demo_business(tmp_path):
+    """A demo store seeded before stage 5 gets staff and equipment; an empty store gets nothing."""
+    import os
+    import subprocess
+    import sys
+    run = lambda code: subprocess.run(  # noqa: E731
+        [sys.executable, "-c", code], env={**os.environ, "STORE_DIR": str(tmp_path)},
+        capture_output=True, text=True, check=True).stdout.strip()
+    assert run("from scripts.seed_crm import seed_team_if_missing as f; print(f())") == "False"
+    run("from scripts.seed_crm import seed; seed(reset=True)")
+    for n in ("staff.json", "staff_assignments.json", "equipment.json", "event_equipment.json"):
+        (tmp_path / n).unlink(missing_ok=True)
+    assert run("from scripts.seed_crm import seed_team_if_missing as f; print(f())") == "True"
+    assert run("from scripts.seed_crm import seed_team_if_missing as f; print(f())") == "False"
+    assert (tmp_path / "staff.json").exists() and (tmp_path / "event_equipment.json").exists()

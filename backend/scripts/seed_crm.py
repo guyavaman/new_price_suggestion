@@ -265,6 +265,18 @@ EQUIPMENT = {
 }
 
 
+def seed_team_if_missing() -> bool:
+    """For a demo business seeded before staff existed: add staff and equipment only, and only
+    when the demo customers are there and nobody has been added yet (never touches real data)."""
+    from app.team.service import TeamService
+    crm = CrmService()
+    names = {c.name for c in crm.customers.list(TENANT)}
+    if not {"דנה שפירא", "גיא שמש"} <= names or TeamService().staff(TENANT):
+        return False
+    seed_team(crm, JsonQuoteRepository(), load_catalog())
+    return True
+
+
 def seed_team(crm, repo, catalog) -> None:
     """Staff, equipment stock, scheduling and equipment lists for the demo events."""
     from app.business.settings import SettingsService

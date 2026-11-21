@@ -462,6 +462,9 @@ def _seed_demo() -> None:
     if os.environ.get("SEED_DEMO") == "1" and not get_crm().deals.list("demo"):
         from scripts.seed_crm import seed
         seed(reset=True)
+    elif os.environ.get("SEED_DEMO") == "1":
+        from scripts.seed_crm import seed_team_if_missing
+        seed_team_if_missing()
     from app.business.scheduler import start_background
     start_background(get_crm(), get_repo(), get_settings_service())
 
