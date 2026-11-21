@@ -29,7 +29,8 @@ import { PublicQuote, ServiceChat } from '../core/models';
 
         @if (q.status === 'approved') {
           <div class="done">
-            <b>ההצעה אושרה 🎉</b> חבילת {{ chosen()?.name }} · {{ chosen()?.total | ils }} כולל מע"מ
+            <b>ההצעה אושרה 🎉</b> חבילת {{ chosen()?.name }} ·
+            @if (net()) { {{ chosen()?.net | ils }} לפני מע"מ ({{ chosen()?.total | ils }} כולל מע"מ) } @else { {{ chosen()?.total | ils }} כולל מע"מ }
             @if (q.deposit_paid) { · מקדמה של {{ q.deposit_paid | ils }} התקבלה }
           </div>
           @if (q.can_update_count) {
@@ -55,8 +56,14 @@ import { PublicQuote, ServiceChat } from '../core/models';
           @for (t of q.tiers; track t.key) {
             <button class="tier" role="radio" [attr.aria-checked]="pick() === t.key" [disabled]="!q.can_accept && q.status !== 'approved'" (click)="q.can_accept && pick.set(t.key)">
               <span class="tn">{{ t.name }} @if (t.key === 'recommended') { <em>מומלץ</em> }</span>
-              <b class="num">{{ t.total | ils }}</b>
-              <small class="muted num">{{ t.per_guest | ils }} לאורח · כולל מע"מ</small>
+              @if (net()) {
+                <b class="num">{{ t.net | ils }}</b>
+                <small class="muted num">{{ t.per_guest_net | ils }} לאורח · לפני מע"מ</small>
+                <small class="muted num vatline">מע"מ {{ t.vat | ils }} · סה"כ {{ t.total | ils }}</small>
+              } @else {
+                <b class="num">{{ t.total | ils }}</b>
+                <small class="muted num">{{ t.per_guest | ils }} לאורח · כולל מע"מ</small>
+              }
               <ul>@for (i of t.items; track $index) { <li>{{ i.name }} <span class="muted">× {{ i.quantity }} {{ unit[i.unit] }}</span></li> }</ul>
               @if (t.services.length) { <p class="svc">כולל: {{ t.services.join(' · ') }}</p> }
             </button>
@@ -104,10 +111,18 @@ import { PublicQuote, ServiceChat } from '../core/models';
         }
 
         @if (q.can_accept) {
+          @if (q.terms_required && q.terms?.length) {
+            <section class="card terms" aria-labelledby="terms-h">
+              <h2 id="terms-h">תנאי ההזמנה</h2>
+              <ul>@for (l of q.terms; track $index) { <li>{{ l }}</li> }</ul>
+              <label class="agree"><input type="checkbox" [(ngModel)]="agreed" name="agree"> קראתי ואני מאשר/ת את תנאי ההזמנה</label>
+            </section>
+          }
           <div class="accept card">
-            <div><b>בחרתם: {{ selected()?.name }}</b> · {{ selected()?.total | ils }}
-              @if (q.deposit_rate > 0) { <div class="muted">לאישור משלמים מקדמה של {{ selected()?.deposit | ils }} ({{ q.deposit_rate * 100 }}%). היתרה לפני האירוע.</div> }</div>
-            <button class="btn big" [disabled]="busy()" (click)="accept()">{{ busy() ? 'רגע…' : q.deposit_rate > 0 ? 'אישור ותשלום מקדמה' : 'אישור ההצעה' }}</button>
+            <div><b>בחרתם: {{ selected()?.name }}</b> ·
+              @if (net()) { {{ selected()?.net | ils }} + מע"מ } @else { {{ selected()?.total | ils }} }
+              @if (q.deposit_rate > 0) { <div class="muted">לאישור משלמים מקדמה של {{ selected()?.deposit | ils }}@if (net()) { כולל מע"מ } ({{ q.deposit_rate * 100 }}%). היתרה לפני האירוע.</div> }</div>
+            <button class="btn big" [disabled]="busy() || (q.terms_required && !agreed)" (click)="accept()">{{ busy() ? 'רגע…' : q.deposit_rate > 0 ? 'אישור ותשלום מקדמה' : 'אישור ההצעה' }}</button>
           </div>
           <p class="muted small">ההצעה בתוקף עד {{ q.valid_until | heDate }}
             · <button class="link" type="button" (click)="declining.set(!declining())">ההצעה לא מתאימה לנו</button></p>
@@ -193,6 +208,11 @@ import { PublicQuote, ServiceChat } from '../core/models';
     .dishes .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .ok { color: var(--ok); margin: 0; }
     .pending { background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 8px 12px; }
+    .terms h2 { margin: 0 0 6px; font-size: 1.05rem; }
+    .terms ul { margin: 0 0 10px; padding-inline-start: 20px; display: grid; gap: 4px; font-size: .92rem; }
+    .agree { display: flex; gap: 8px; align-items: center; font-weight: 600; cursor: pointer; }
+    .agree input { width: 20px; height: 20px; }
+    .vatline { font-size: .78rem; }
     .accept { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; position: sticky; bottom: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.12); }
     .big { font-size: 1.05rem; padding: 12px 22px; } .small { font-size: .85rem; }
   `],
@@ -244,16 +264,21 @@ export class CustomerQuoteComponent {
   selected = computed(() => this.q()?.tiers.find((t) => t.key === this.pick()));
   chosen = computed(() => { const q = this.q(); return q?.tiers.find((t) => t.key === q.selected_tier); });
 
+  agreed = false;
+  net = computed(() => this.q()?.price_mode === 'net');
+  private opened = false;
   constructor() { effect(() => this.load(this.token()), { allowSignalWrites: true }); }
   load(token: string) {
-    this.api.publicQuote(token).subscribe({
+    const from = this.opened ? undefined : 'link';  // count the customer opening it, once per visit
+    this.opened = true;
+    this.api.publicQuote(token, from).subscribe({
       next: (q) => { this.q.set(q); this.pick.set(q.selected_tier); this.guests = q.final_guest_count ?? q.event.guests; this.dishDraft.set(this.savedDishes()); },
       error: () => this.error.set('הקישור לא תקין או שפג תוקפו.'),
     });
   }
   accept() {
     this.busy.set(true);
-    this.api.acceptQuote(this.token(), this.pick()).subscribe({
+    this.api.acceptQuote(this.token(), this.pick(), this.agreed ? this.q()?.terms_version : undefined).subscribe({
       next: (r) => { if (r.checkout_url) location.href = r.checkout_url; else { this.busy.set(false); this.load(this.token()); } },
       error: (e) => { this.busy.set(false); this.error.set(e.error?.detail ?? 'משהו השתבש, נסו שוב'); },
     });

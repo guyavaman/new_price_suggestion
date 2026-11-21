@@ -46,7 +46,8 @@ def test_deal_score_title_and_stage_log(crm):
                            guest_count=150, event_date=EVENT_DAY, kashrut="kosher",
                            meal_type="meat"))
     assert d.title.startswith("חתונה · דנה · 150 אורחים")
-    assert d.lead_score == 80 and any("60 יום" in r for r in d.score_reasons)
+    # details alone (stage 7): 10 contact + 5 date + 5 guests + 5 kashrut/meal + 10 soon + 10 big
+    assert d.lead_score == 45 and any("60 יום" in r for r in d.score_reasons)
     crm.move_stage(T, d.id, DealStage.quoted, Actor.agent)
     tl = crm.timeline(T, d.id)
     assert tl[0].kind == "stage" and tl[0].meta == {"from": "new", "to": "quoted"}

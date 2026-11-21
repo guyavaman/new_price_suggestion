@@ -9,7 +9,12 @@ test('customer picks a package, pays the deposit, and the event is booked', asyn
 
   await page.getByRole('radio', { name: /פרימיום/ }).click();
   await expect(page.locator('.accept')).toContainText('פרימיום');
-  await page.getByRole('button', { name: 'אישור ותשלום מקדמה' }).click();
+  // the order terms come first: the button stays off until the customer accepts them
+  const pay = page.getByRole('button', { name: 'אישור ותשלום מקדמה' });
+  await expect(page.locator('.terms')).toContainText('ביטול');
+  await expect(pay).toBeDisabled();
+  await page.getByLabel('קראתי ואני מאשר/ת את תנאי ההזמנה').check();
+  await pay.click();
 
   await expect(page).toHaveURL(/\/pay\//);
   await expect(page.locator('h1')).toHaveText('תשלום מקדמה');
@@ -22,6 +27,8 @@ test('customer picks a package, pays the deposit, and the event is booked', asyn
   const deal = await dealOf(request, q.id);
   expect(deal.stage).toBe('won');
   expect(deal.deposit_paid).toBeGreaterThan(0);
+  expect(deal.terms.lines.length).toBeGreaterThan(3);              // what was accepted, kept
+  expect(deal.signals.quote_opens).toBeGreaterThan(0);             // opening the link counted
 
   // the owner sees it approved
   await page.goto(`/quotes/${q.id}`);

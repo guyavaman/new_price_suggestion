@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   BusinessSettings, CalendarDay, CatalogItem, ChatReply, Conversation, Customer, Dashboard, Deal, DealDetail,
-  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions, StaffMember, DealStaff, PayRow, EquipmentType, EquipmentLine, EquipmentState, MissingReturn, ShiftView, ClosingView, EventClosing, LearningView, PortionSuggestion } from './models';
+  DealStage, EditOut, KitchenSheet, PublicQuote, QuoteOut, QuoteStatus, StoredQuote, Task, TodayView, ServiceChat, CustomerMessage, ImpactRow, ImportReport, QuoteProfit, ProfitReport, DealMenu, OwnerMenu, Supplier, Ingredient, PurchaseList, PrepDay, Readiness, SiteConditions, StaffMember, DealStaff, PayRow, EquipmentType, EquipmentLine, EquipmentState, MissingReturn, ShiftView, ClosingView, EventClosing, LearningView, PortionSuggestion, CustomerHistory, SalesReport } from './models';
 
 /** Point these at your backend. The API key is only needed when the tenant has one. */
 export const CONFIG = {
@@ -106,7 +106,7 @@ export class ApiService {
     return this.http.post<ImportReport>(this.u(`/purchasing/import${apply ? '?apply=true' : ''}`), fd);
   }
   readiness(dealId: string): Observable<Readiness> { return this.http.get<Readiness>(this.u(`/crm/deals/${dealId}/readiness`)); }
-  patchReadiness(dealId: string, body: Partial<{ location: string; site_contact_name: string; site_contact_phone: string; site: Partial<SiteConditions>; marks: Record<string, boolean>; service_style: string | null }>): Observable<Readiness> {
+  patchReadiness(dealId: string, body: Partial<{ location: string; site_contact_name: string; site_contact_phone: string; site: Partial<SiteConditions>; marks: Record<string, boolean>; service_style: string | null; event_time: string | null; distance_km: number | null }>): Observable<Readiness> {
     return this.http.patch<Readiness>(this.u(`/crm/deals/${dealId}/readiness`), body);
   }
   decideChange(dealId: string, requestId: string, decision: 'approve' | 'decline'): Observable<unknown> { return this.http.post(this.u(`/crm/deals/${dealId}/changes/${requestId}/${decision}`), {}); }
@@ -158,10 +158,17 @@ export class ApiService {
   runAutomation(): Observable<{ rule: string; deal_id: string; title: string }[]> { return this.http.post<{ rule: string; deal_id: string; title: string }[]>(this.u('/automation/run'), {}); }
 
   // ---------- customer page (public, token based) ----------
-  publicQuote(token: string): Observable<PublicQuote> { return this.http.get<PublicQuote>(this.u(`/public/quotes/${token}`)); }
-  acceptQuote(token: string, tier: string): Observable<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }> {
-    return this.http.post<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }>(this.u(`/public/quotes/${token}/accept`), { tier });
+  /** `from`: 'link' | 'pdf' when the customer opens it (counted for the lead score); omit for the owner. */
+  publicQuote(token: string, from?: 'link' | 'pdf'): Observable<PublicQuote> {
+    return this.http.get<PublicQuote>(this.u(`/public/quotes/${token}`) + (from ? `?from=${from}` : ''));
   }
+  acceptQuote(token: string, tier: string, terms_version?: string, name?: string): Observable<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }> {
+    return this.http.post<{ approved: boolean; checkout_url: string | null; payment_id?: string; amount?: number }>(this.u(`/public/quotes/${token}/accept`), { tier, terms_version, name });
+  }
+  patchCustomer(id: string, body: Partial<Customer> & { clear_kind?: boolean }): Observable<Customer> { return this.http.patch<Customer>(this.u(`/crm/customers/${id}`), body); }
+  customerHistory(id: string): Observable<CustomerHistory> { return this.http.get<CustomerHistory>(this.u(`/crm/customers/${id}/history`)); }
+  salesReport(months = 12): Observable<SalesReport> { return this.http.get<SalesReport>(this.u(`/reports/sales?months=${months}`)); }
+  termsPreview(): Observable<{ lines: string[]; version: string }> { return this.http.get<{ lines: string[]; version: string }>(this.u('/settings/terms')); }
   serviceChatHistory(token: string): Observable<ServiceChat> { return this.http.get<ServiceChat>(this.u(`/public/quotes/${token}/chat`)); }
   serviceChat(token: string, message: string): Observable<ServiceChat> { return this.http.post<ServiceChat>(this.u(`/public/quotes/${token}/chat`), { message }); }
   declineQuote(token: string, reason: string): Observable<PublicQuote> { return this.http.post<PublicQuote>(this.u(`/public/quotes/${token}/decline`), { reason }); }

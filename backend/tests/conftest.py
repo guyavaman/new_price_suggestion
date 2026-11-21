@@ -52,6 +52,8 @@ def env(tmp_path):
     from app.services.portal import CustomerPortal
     T = "acme"
     settings = SettingsService(tmp_path)
+    # most flows accept a quote in one call; the terms step has its own tests (test_commerce)
+    settings.update("acme", {"require_terms": False})
     crm = CrmService(tmp_path, settings)
     catalog = CatalogService(tmp_path)
     repo = JsonQuoteRepository(tmp_path / "quotes.json")

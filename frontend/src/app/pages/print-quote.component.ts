@@ -66,23 +66,29 @@ import { PublicQuote } from '../core/models';
               <tr><td>סכום לפני הנחה</td><td>{{ t.subtotal | ils: 2 }}</td></tr>
               <tr><td>הנחת היקף {{ pct(t.discount_rate) }}%</td><td>−{{ t.discount | ils: 2 }}</td></tr>
             }
-            <tr><td>סה"כ לפני מע"מ</td><td>{{ t.net | ils: 2 }}</td></tr>
-            <tr><td>מע"מ {{ pct(q.vat_rate) }}%</td><td>{{ t.vat | ils: 2 }}</td></tr>
-            <tr class="total"><td>סה"כ לתשלום</td><td>{{ t.total | ils: 2 }}</td></tr>
-            @if (t.per_guest) { <tr class="pg"><td>לאורח</td><td>{{ t.per_guest | ils }}</td></tr> }
+            @if (q.price_mode === 'net') {
+              <tr><td>סה"כ לפני מע"מ</td><td>{{ t.net | ils: 2 }}</td></tr>
+              <tr><td>מע"מ {{ pct(q.vat_rate) }}%</td><td>{{ t.vat | ils: 2 }}</td></tr>
+              <tr class="total"><td>סה"כ לתשלום</td><td>{{ t.total | ils: 2 }}</td></tr>
+              @if (t.per_guest_net) { <tr class="pg"><td>לאורח, לפני מע"מ</td><td>{{ t.per_guest_net | ils }}</td></tr> }
+            } @else {
+              <tr class="total"><td>סה"כ לתשלום (כולל מע"מ)</td><td>{{ t.total | ils: 2 }}</td></tr>
+              @if (t.per_guest) { <tr class="pg"><td>לאורח</td><td>{{ t.per_guest | ils }}</td></tr> }
+            }
           </table>
 
           @if (others().length) {
             <p class="others"><b>חבילות נוספות:</b>
-              @for (o of others(); track o.key; let last = $last) { {{ o.name }} {{ o.total | ils }}@if (!last) { · } }</p>
+              @for (o of others(); track o.key; let last = $last) { {{ o.name }} {{ (q.price_mode === 'net' ? o.net : o.total) | ils }}@if (!last) { · } }
+              @if (q.price_mode === 'net') { (לפני מע"מ) }</p>
           }
 
           <section class="terms">
             <h3>תנאים</h3>
             <ul>
-              <li>המחירים בשקלים וכוללים מע"מ, צוות ומשלוח כמפורט.</li>
-              @if (q.deposit_rate) { <li>אישור ההזמנה בתשלום מקדמה של {{ pct(q.deposit_rate) }}% ({{ t.deposit | ils }}). היתרה עד לפני האירוע.</li> }
-              <li>את מספר האורחים הסופי אפשר לעדכן עד יומיים לפני האירוע, והמחיר יתעדכן בהתאם.</li>
+              <li>המחירים בשקלים@if (q.price_mode === 'net') {, לפני מע"מ (מע"מ מפורט למעלה)} @else {, כוללים מע"מ}, צוות ומשלוח כמפורט.</li>
+              @if (q.deposit_rate) { <li>מקדמה לאישור: {{ t.deposit | ils }} כולל מע"מ.</li> }
+              @for (l of q.terms ?? []; track $index) { <li>{{ l }}</li> }
               <li>ההצעה בתוקף עד {{ q.valid_until | heDate }}.</li>
             </ul>
             <p class="link">לאישור ותשלום מקדמה אונליין: <span dir="ltr">{{ link() }}</span></p>
@@ -130,6 +136,7 @@ export class PrintQuoteComponent {
   private api = inject(ApiService);
   token = input.required<string>();
   tierParam = input<string | undefined>(undefined, { alias: 'tier' });
+  ownerParam = input<string | undefined>(undefined, { alias: 'owner' });  // the owner's preview isn't counted
   q = signal<PublicQuote | null>(null);
   error = signal('');
   picked = signal<string | null>(null);
@@ -145,7 +152,7 @@ export class PrintQuoteComponent {
   link = computed(() => `${location.origin}/q/${this.token()}`);
 
   constructor() {
-    effect(() => this.api.publicQuote(this.token()).subscribe({
+    effect(() => this.api.publicQuote(this.token(), this.ownerParam() ? undefined : 'pdf').subscribe({
       next: (q) => this.q.set(q),
       error: () => this.error.set('הקישור לא תקין'),
     }), { allowSignalWrites: true });

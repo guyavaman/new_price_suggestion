@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.repositories.store import STORE_DIR, Collection
 from app.schemas.catalog import Measure, PortionRule
@@ -48,6 +48,69 @@ def _default_styles() -> dict[str, StyleStaffing]:
     return {"buffet": StyleStaffing(waiter_ratio=20), "plated": StyleStaffing(waiter_ratio=10),
             "finger": StyleStaffing(waiter_ratio=25),
             "chef_station": StyleStaffing(waiter_ratio=15, chef_ratio=80)}
+
+
+class CancellationStep(BaseModel):
+    """Cancelling at least `days_before` days before the event returns `refund_rate` of the
+    deposit. The step with the most days that still applies wins."""
+    days_before: int = Field(..., ge=0, le=365)
+    refund_rate: float = Field(..., ge=0, le=1)
+
+
+def _default_cancellation() -> list[CancellationStep]:
+    return [CancellationStep(days_before=30, refund_rate=1.0),
+            CancellationStep(days_before=14, refund_rate=0.5),
+            CancellationStep(days_before=0, refund_rate=0.0)]
+
+
+class DeliveryZone(BaseModel):
+    """Where the event is decides the delivery line. Matched by distance when it's known (the
+    smallest `max_km` that covers it), else by a word in the location, else the default zone.
+    The price and cost come from a catalog item: `sku`, or the item with `role`."""
+    id: str = Field(..., min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(..., min_length=1, max_length=60)
+    sku: str | None = None
+    role: str | None = Field(None, description="delivery_center | delivery_remote")
+    keywords: list[str] = Field(default_factory=list)
+    max_km: float | None = Field(None, gt=0, le=1000)
+    default: bool = False
+
+
+class DeliveryWindow(BaseModel):
+    """A surcharge for delivering at a hard time (early morning, Friday before Shabbat).
+    `days`: 0 = Sunday … 6 = Saturday; empty = every day. Times are "HH:MM" local; a window
+    may cross midnight (22:00 → 06:00)."""
+    id: str = Field(..., min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    name: str = Field(..., min_length=1, max_length=60)
+    start: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(..., pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    days: list[int] = Field(default_factory=list)
+    price: float = Field(..., ge=0, description="added to the quote, before VAT")
+    cost: float | None = Field(None, ge=0, description="what it costs the business; null = unknown")
+
+
+REMOTE_DEFAULT = ["ירושלים", "חיפה", "צפון", "גליל", "עמק", "באר שבע", "אילת", "נגב", "גולן",
+                  "jerusalem", "haifa", "north", "galilee", "beer sheva", "eilat"]
+
+
+def zones_from_areas(areas: list[str]) -> list[DeliveryZone]:
+    """The two zones the business had before zones existed (central / remote by keywords)."""
+    return [DeliveryZone(id="center", name="מרכז", role="delivery_center", default=True),
+            DeliveryZone(id="remote", name="מרוחק", role="delivery_remote", keywords=areas)]
+
+
+def _default_windows() -> list[DeliveryWindow]:
+    return [DeliveryWindow(id="early", name="משלוח מוקדם (לפני 7:00)", start="00:00",
+                           end="07:00", price=200, cost=120),
+            DeliveryWindow(id="friday", name="שישי אחר הצהריים", start="12:00", end="18:00",
+                           days=[5], price=150, cost=90)]
+
+
+def _default_score() -> dict[str, int]:
+    return {"contact": 10, "date": 5, "guests": 5, "budget": 5, "details": 5,
+            "soon": 10, "big": 10, "quote": 10,
+            "opened": 15, "opened_again": 10, "pdf": 5, "asked_human": 15,
+            "asked_price": 10, "asked_date": 10}
 
 
 class BusinessSettings(BaseModel):
@@ -105,10 +168,20 @@ class BusinessSettings(BaseModel):
         VolumeDiscount(min_subtotal=50_000, rate=0.08),
         VolumeDiscount(min_subtotal=20_000, rate=0.05),
     ])
-    remote_areas: list[str] = Field(default_factory=lambda: [
-        "ירושלים", "חיפה", "צפון", "גליל", "עמק", "באר שבע", "אילת", "נגב", "גולן",
-        "jerusalem", "haifa", "north", "galilee", "beer sheva", "eilat",
-    ])
+    remote_areas: list[str] = Field(default_factory=lambda: list(REMOTE_DEFAULT),
+                                    description="older setting; the zones replaced it")
+    delivery_zones: list[DeliveryZone] = Field(
+        default_factory=lambda: zones_from_areas(REMOTE_DEFAULT))
+    delivery_windows: list[DeliveryWindow] = Field(default_factory=_default_windows)
+    # terms the customer accepts before paying the deposit (stage 7)
+    require_terms: bool = Field(True, description="the customer must accept before paying")
+    cancellation_policy: list[CancellationStep] = Field(default_factory=_default_cancellation)
+    terms_extra: list[str] = Field(default_factory=list, description="more lines, by the owner")
+    # returning customers
+    reorder_reminder_days: int = Field(90, ge=7, le=730, description=(
+        "remind about a business customer that hasn't ordered for N days"))
+    # lead score: points per signal (see crm/scoring.py)
+    score_weights: dict[str, int] = Field(default_factory=_default_score)
     # capacity
     max_events_per_day: int = Field(3, ge=1)
     max_guests_per_day: int = Field(600, ge=1)
@@ -130,6 +203,16 @@ class BusinessSettings(BaseModel):
     automation_last_run: str | None = Field(None, description="date of the last daily run")
     invoice_provider: str = Field("manual", description="manual | morning")
     # customer service: what the agent may answer without asking the owner
+    @model_validator(mode="before")
+    @classmethod
+    def _zones_from_old_areas(cls, data):
+        """Settings saved before zones existed: build the zones from their remote areas, so a
+        business that edited its areas keeps them (read-time migration, nothing is lost)."""
+        if isinstance(data, dict) and "delivery_zones" not in data and data.get("remote_areas"):
+            data = {**data, "delivery_zones": [z.model_dump() for z in
+                                               zones_from_areas(data["remote_areas"])]}
+        return data
+
     service_info: str = Field(
         "כשרות: בהשגחת הרבנות המקומית. תעודת כשרות נשלחת לפי בקשה.\n"
         "הגעה: הצוות מגיע כשעתיים לפני תחילת האירוע להקמה.\n"
@@ -151,4 +234,11 @@ class SettingsService:
         current.update({k: v for k, v in patch.items() if k not in ("id", "tenant_id")})
         s = BusinessSettings.model_validate(current)
         s.volume_discounts.sort(key=lambda d: -d.min_subtotal)
+        s.cancellation_policy.sort(key=lambda c: -c.days_before)
+        ids = [z.id for z in s.delivery_zones]
+        if len(set(ids)) != len(ids) or len({w.id for w in s.delivery_windows}) != len(
+                s.delivery_windows):
+            raise ValueError("מזהה אזור או חלון זמן מופיע פעמיים")
+        if s.delivery_zones and sum(z.default for z in s.delivery_zones) != 1:
+            raise ValueError("צריך בדיוק אזור משלוח אחד שמוגדר כברירת מחדל")
         return self.col.put(s)

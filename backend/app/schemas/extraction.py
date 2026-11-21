@@ -112,6 +112,11 @@ class ExtractedRequest(BaseModel):
         None, description="ISO date. Resolve relative dates using the reference date."
     )
     location: str | None = None
+    event_time: str | None = Field(
+        None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+        description="HH:MM when the food is needed, only if the customer said it. Else null.")
+    distance_km: float | None = Field(
+        None, gt=0, le=1000, description="Leave null: the business fills it in.")
     kashrut: Kashrut | None = Field(None, description="Null if not mentioned.")
     meal_type: MealType | None = Field(None, description="Null if not mentioned or unclear.")
     dietary_requirements: list[DietaryRequirement] = Field(default_factory=list)

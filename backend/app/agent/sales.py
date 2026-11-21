@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 from pydantic import BaseModel, Field
 
 from app.agent.service import ServiceContext, ServiceTools, service_system
-from app.agent.signals import is_frustrated
+from app.agent.signals import chat_signals, is_frustrated
 from app.business.settings import BusinessSettings
 from app.crm.models import (
     ActivityKind,
@@ -32,9 +32,11 @@ from app.crm.models import (
     Conversation,
     ConversationStatus,
     Customer,
+    CustomerKind,
     Deal,
     DealStage,
     Source,
+    customer_kind,
     now,
 )
 from app.crm.service import CrmService
@@ -236,6 +238,18 @@ class SalesAgent:
                                              tools=[{"tool": a["tool"], "error": a["error"]}
                                                     for a in actions]))
         deal = self.crm.deals.get(tenant, conv.deal_id) if conv.deal_id else None
+        if deal is not None:  # intent signals from what the customer asked (re-scores)
+            sig = chat_signals([m.text for m in conv.messages if m.role == ChatRole.user],
+                               conv.status in (ConversationStatus.handed_off,
+                                               ConversationStatus.human))
+            cur = deal.signals
+            new = {"price_questions": max(cur.price_questions, sig["price_questions"]),
+                   "date_questions": max(cur.date_questions, sig["date_questions"]),
+                   "asked_human": cur.asked_human or sig["asked_human"]}
+            if any(getattr(cur, k) != v for k, v in new.items()):
+                deal.signals = cur.model_copy(update=new)
+                self.crm.save_deal(deal)
+                deal = self.crm.deals.get(tenant, deal.id)
         conv.lead_score = deal.lead_score if deal else 0
         conv.updated_at = now()
         self.crm.conversations.put(conv)
@@ -334,6 +348,15 @@ class _Session:
         ok_tiers = [t for t in tiers if profit_check(t.quote, self.a.rules.profit_floor)[0]]
         if not any(t.key == "recommended" for t in ok_tiers):
             return self._needs_human(tiers, "הערכת מחיר")
+        cust = (self.crm.customers.get(self.tenant, self.conv.customer_id)
+                if self.conv.customer_id else None)
+        if customer_kind(cust) == CustomerKind.business:  # a business compares before VAT
+            g = req.guest_count or 0
+            return {"note": "הערכה ראשונית לפני מע\"מ, כולל צוות ומשלוח. ההצעה הסופית תלויה "
+                            "בתפריט. כשמציגים ללקוח עסקי, לציין שהמחיר לפני מע\"מ.",
+                    "packages": [{"name": t.name, "total_before_vat": t.quote.net,
+                                  "per_guest_before_vat": round(t.quote.net / g, 2) if g else None}
+                                 for t in ok_tiers]}
         return {"note": "הערכה ראשונית כולל מע\"מ, צוות ומשלוח. ההצעה הסופית תלויה בתפריט.",
                 "packages": [{"name": t.name, "total": t.quote.total,
                               "per_guest": t.quote.per_guest} for t in ok_tiers]}

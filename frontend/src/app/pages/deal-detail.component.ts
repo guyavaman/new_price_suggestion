@@ -99,6 +99,9 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
               @if (siteOpen()) {
                 <form class="site" (ngSubmit)="saveSite()">
                   <label>כתובת המקום<input name="loc" [(ngModel)]="siteForm.location" maxlength="200"></label>
+                  <label>שעת הגעת האוכל<input name="et" type="time" [(ngModel)]="siteForm.event_time"></label>
+                  <label>מרחק מהמטבח (ק"מ)<input name="km" type="number" min="1" max="1000" [(ngModel)]="siteForm.distance_km" placeholder="לא ידוע"></label>
+                  <p class="hint">המיקום, השעה והמרחק קובעים את שורת המשלוח בהצעה. שינוי שלהם מעדכן את המחיר.</p>
                   <label>איש קשר במקום<input name="scn" [(ngModel)]="siteForm.site_contact_name" maxlength="80"></label>
                   <label>טלפון במקום<input name="scp" [(ngModel)]="siteForm.site_contact_phone" inputmode="tel" maxlength="30"></label>
                   <div class="conds">
@@ -245,7 +248,19 @@ import { BusinessSettings, CustomerMessage, DealDetail, DealStage, DealMenu, Rea
           <section class="card">
             <h2>למה {{ temp[x.deal.temperature] }}?</h2>
             <ul class="reasons">@for (r of x.deal.score_reasons; track r) { <li>{{ r }}</li> }</ul>
+            @if (x.deal.signals; as sg) {
+              @if (sg.quote_opens || sg.pdf_views) {
+                <p class="muted small">פתח את ההצעה {{ sg.quote_opens }} פעמים@if (sg.last_opened_at) { , לאחרונה {{ sg.last_opened_at | rel }}}@if (sg.pdf_views) { · הוריד PDF {{ sg.pdf_views }} פעמים}</p>
+              }
+            }
           </section>
+          @if (x.deal.terms; as tm) {
+            <section class="card" aria-labelledby="tm-h">
+              <h2 id="tm-h">תנאי ההזמנה אושרו</h2>
+              <p class="muted small">{{ tm.accepted_at | heDate }}@if (tm.name) { · {{ tm.name }}} · גרסה <bdi>{{ tm.version }}</bdi></p>
+              <details><summary>הנוסח שהלקוח אישר</summary><ul class="reasons">@for (l of tm.lines; track $index) { <li>{{ l }}</li> }</ul></details>
+            </section>
+          }
           @if (x.conversation; as conv) {
             <section class="card">
               <h2>שיחה עם הסוכנת</h2>
@@ -371,16 +386,18 @@ export class DealDetailComponent {
   styles: [string, string][] = [['buffet', 'מזנון'], ['plated', 'הגשה לשולחן'], ['finger', 'פינגר פוד'], ['chef_station', 'שף במקום']];
   siteKeys: ['electricity' | 'kitchenette' | 'fridge' | 'parking', string][] = [['electricity', 'חשמל'], ['kitchenette', 'מטבחון'], ['fridge', 'מקרר'], ['parking', 'חניה']];
   tri: [boolean | null, string][] = [[true, 'יש'], [false, 'אין'], [null, 'לא נבדק']];
-  siteForm = { location: '', site_contact_name: '', site_contact_phone: '', site: { electricity: null, kitchenette: null, fridge: null, parking: null } as Record<string, boolean | null> };
+  siteForm = { location: '', event_time: '' as string | null, distance_km: null as number | null, site_contact_name: '', site_contact_phone: '', site: { electricity: null, kitchenette: null, fridge: null, parking: null } as Record<string, boolean | null> };
   pendingChanges = computed(() => (this.x()?.deal.change_requests ?? []).filter((c) => c.status === 'pending'));
   private fillSite() {
     const d = this.x()?.deal;
     if (!d) return;
-    this.siteForm = { location: d.location ?? '', site_contact_name: d.site_contact_name ?? '', site_contact_phone: d.site_contact_phone ?? '',
+    this.siteForm = { location: d.location ?? '', event_time: d.event_time ?? '', distance_km: d.distance_km ?? null, site_contact_name: d.site_contact_name ?? '', site_contact_phone: d.site_contact_phone ?? '',
       site: { electricity: d.site?.electricity ?? null, kitchenette: d.site?.kitchenette ?? null, fridge: d.site?.fridge ?? null, parking: d.site?.parking ?? null } };
   }
   saveSite() {
-    this.api.patchReadiness(this.id(), { location: this.siteForm.location, site_contact_name: this.siteForm.site_contact_name,
+    const km = this.siteForm.distance_km as unknown;
+    this.api.patchReadiness(this.id(), { location: this.siteForm.location, event_time: this.siteForm.event_time || null,
+      distance_km: km === '' || km === null || km === undefined ? null : +km, site_contact_name: this.siteForm.site_contact_name,
       site_contact_phone: this.siteForm.site_contact_phone, site: this.siteForm.site }).subscribe(() => { this.siteOpen.set(false); this.load(); });
   }
   isPast(d: string | null) { return !!d && d < new Date().toISOString().slice(0, 10); }

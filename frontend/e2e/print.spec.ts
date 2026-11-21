@@ -5,7 +5,7 @@ test('quote prints as a one-page A4 PDF with the full breakdown', async ({ page,
   const q = await quoteOf(request, 'הדס יעקב');
   // owner quote page links to the print view of the package being viewed
   await page.goto(`/quotes/${q.id}`);
-  await expect(page.getByRole('link', { name: 'הדפסה / PDF' })).toHaveAttribute('href', `/print/${q.public_token}?tier=recommended`);
+  await expect(page.getByRole('link', { name: 'הדפסה / PDF' })).toHaveAttribute('href', `/print/${q.public_token}?tier=recommended&owner=1`);
   // customer page offers it too
   await page.goto(`/q/${q.public_token}`);
   await expect(page.getByRole('link', { name: 'הורדת PDF' })).toHaveAttribute('href', `/print/${q.public_token}`);
@@ -14,8 +14,10 @@ test('quote prints as a one-page A4 PDF with the full breakdown', async ({ page,
   const sheet = page.locator('.sheet');
   await expect(sheet).toContainText('הצעת מחיר');
   await expect(sheet).toContainText('חבילת פרימיום');
-  await expect(sheet.locator('.sum')).toContainText('מע"מ 18%');
-  await expect(sheet.locator('.sum .total')).toContainText('סה"כ לתשלום');
+  // a private customer: one total including VAT, and the real terms
+  await expect(sheet.locator('.sum .total')).toContainText('סה"כ לתשלום (כולל מע"מ)');
+  await expect(sheet.locator('.sum')).not.toContainText('מע"מ 18%');
+  await expect(sheet.locator('.terms')).toContainText('ביטול');
   await page.getByRole('radio', { name: 'בסיס' }).click();
   await expect(sheet).toContainText('חבילת בסיס');
 
@@ -24,4 +26,14 @@ test('quote prints as a one-page A4 PDF with the full breakdown', async ({ page,
   const pdf = await page.pdf({ format: 'A4', printBackground: true });
   expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
   expect((pdf.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length).toBe(1);
+});
+
+test('a business customer gets prices before VAT, with a VAT line', async ({ page, request }) => {
+  const q = await quoteOf(request, 'דנה שפירא'); // seeded as a business customer
+  await page.goto(`/print/${q.public_token}?owner=1`);
+  const sum = page.locator('.sheet .sum');
+  await expect(sum).toContainText('סה"כ לפני מע"מ');
+  await expect(sum).toContainText('מע"מ 18%');
+  await page.goto(`/q/${q.public_token}`);
+  await expect(page.locator('.done')).toContainText('לפני מע"מ');
 });

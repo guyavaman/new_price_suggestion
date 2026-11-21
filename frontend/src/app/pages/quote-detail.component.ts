@@ -22,7 +22,7 @@ import { EditOut, OwnerMenu, QuoteProfit, QuoteStatus, StoredQuote, TierQuote } 
             @if (dealId()) { · <a [routerLink]="['/deals', dealId()]">לעסקה ב-CRM ←</a> }</p>
         </div>
         <div class="actions">
-          <a class="btn ghost" [href]="'/print/' + q.public_token + '?tier=' + view()" target="_blank" rel="noopener">הדפסה / PDF</a>
+          <a class="btn ghost" [href]="'/print/' + q.public_token + '?tier=' + view() + '&owner=1'" target="_blank" rel="noopener">הדפסה / PDF</a>
           @if (q.status === 'draft' || q.status === 'rejected' || q.status === 'expired') { <button class="btn ghost" (click)="setStatus('sent')">סמן כנשלחה</button> }
           @if (q.status !== 'approved') {
             <button class="btn" (click)="setStatus('approved')">הלקוח אישר את חבילת {{ tier()?.name }}</button>

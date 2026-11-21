@@ -169,11 +169,38 @@ def m004_kitchen_fields(base: Path) -> int:
     return changed
 
 
+def m005_rescore_leads(base: Path) -> int:
+    """Stage 7: the lead score now weighs intent over details. Re-score stored deals with the
+    tenant's weights; only lead_score / score_reasons change (new fields get their defaults)."""
+    from app.business.settings import SettingsService  # late imports
+    from app.crm.models import Customer, Deal
+    from app.crm.scoring import score
+    path = base / "crm_deals.json"
+    deals = _read(path)
+    if not deals:
+        return 0
+    customers = _read(base / "crm_customers.json")
+    settings = SettingsService(base)
+    changed = 0
+    for raw in deals.values():
+        d = Deal.model_validate(raw)
+        c = customers.get(d.customer_id)
+        pts, why = score(d, Customer.model_validate(c) if c else None,
+                         weights=settings.get(d.tenant_id).score_weights)
+        if pts != raw.get("lead_score") or why != raw.get("score_reasons"):
+            raw["lead_score"], raw["score_reasons"] = pts, why
+            changed += 1
+    if changed:
+        _write(path, deals)
+    return changed
+
+
 MIGRATIONS: list[tuple[str, Callable[[Path], int]]] = [
     ("001_deal_won_at_and_net_value", m001_deal_won_at_and_net_value),
     ("002_catalog_roles_and_costs", m002_catalog_roles_and_costs),
     ("003_package_slots_and_yields", m003_package_slots_and_yields),
     ("004_kitchen_fields", m004_kitchen_fields),
+    ("005_rescore_leads", m005_rescore_leads),
 ]
 
 

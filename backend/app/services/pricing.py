@@ -64,6 +64,47 @@ def compute_quantity(item: CatalogItem, for_guests: int | None, quantity: float 
     return g, f"{g} סועדים"
 
 
+def pick_zone(rules: BusinessSettings, location: str | None, km: float | None):
+    """→ (zone, why). By distance when known (the smallest max_km that covers it), else by a
+    word in the location, else the default zone. None when the business has no zones."""
+    zones = rules.delivery_zones
+    if not zones:
+        return None, ""
+    if km is not None:
+        fits = sorted((z for z in zones if z.max_km and km <= z.max_km), key=lambda z: z.max_km)
+        if fits:
+            return fits[0], f"{km:g} ק\"מ"
+        far = [z for z in zones if z.max_km]
+        if far:  # beyond every distance band: the widest one
+            return max(far, key=lambda z: z.max_km), f"{km:g} ק\"מ"
+    loc = (location or "").lower()
+    for z in zones:
+        if loc and any(k.strip() and k.strip().lower() in loc for k in z.keywords):
+            return z, location or ""
+    z = next((z for z in zones if z.default), zones[0])
+    return z, location or "מיקום לא ידוע: ברירת מחדל"
+
+
+def _minutes(hhmm: str) -> int:
+    h, m = hhmm.split(":")
+    return int(h) * 60 + int(m)
+
+
+def windows_for(rules: BusinessSettings, event_date, event_time: str | None) -> list:
+    """Surcharge windows the delivery time falls in. No time known → none (not a guess)."""
+    if not event_time:
+        return []
+    t = _minutes(event_time)
+    day = (event_date.weekday() + 1) % 7 if event_date else None  # 0 = Sunday
+    out = []
+    for w in rules.delivery_windows:
+        a, b = _minutes(w.start), _minutes(w.end)
+        inside = a <= t < b if a < b else (t >= a or t < b)
+        if inside and (not w.days or (day is not None and day in w.days)):
+            out.append(w)
+    return out
+
+
 class PricingEngine:
     def __init__(self, catalog: list[CatalogItem], vat_rate: float | None = None,
                  rules: BusinessSettings | None = None, choices: dict | None = None):
@@ -172,10 +213,27 @@ class PricingEngine:
         ):
             add(ItemRole.setup, 1, "")
         if lines:
-            loc = (req.location or "").lower()
-            remote = any(k in loc for k in R.remote_areas)
-            add(ItemRole.delivery_remote if remote else ItemRole.delivery_center, 1,
-                f"ל{req.location}" if req.location else "אזור מרכז (ברירת מחדל)")
+            zone, why = pick_zone(R, req.location, req.distance_km)
+            item = None
+            if zone is not None:
+                item = (self.by_sku.get(zone.sku) if zone.sku
+                        else self.by_role.get(ItemRole(zone.role)) if zone.role else None)
+                if item is None:
+                    guards.append(f"לאזור המשלוח '{zone.name}' אין פריט בקטלוג: השורה לא נוספה")
+                else:
+                    lines.append(self._line(item, 1, f"אזור {zone.name} · {why}",
+                                            LineSource.rule, Confidence.rule))
+            else:  # no zones configured at all: the older two-role rule
+                loc = (req.location or "").lower()
+                remote = any(k in loc for k in R.remote_areas)
+                add(ItemRole.delivery_remote if remote else ItemRole.delivery_center, 1,
+                    f"ל{req.location}" if req.location else "אזור מרכז (ברירת מחדל)")
+            for w in windows_for(R, req.event_date, req.event_time):
+                lines.append(QuoteLine(
+                    sku=f"DLV-{w.id}", name_he=f"תוספת משלוח: {w.name}", unit="unit",
+                    unit_price=_r2(w.price), quantity=1, total=_r2(w.price),
+                    note=f"הגעה ב-{req.event_time}", source=LineSource.rule,
+                    confidence=Confidence.rule, unit_cost=w.cost, cost_group="logistics"))
 
         # 4. approved adjustments (late changes): a fixed amount, no cost behind it
         for a in plan.adjustments:

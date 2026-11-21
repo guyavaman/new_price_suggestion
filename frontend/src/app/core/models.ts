@@ -10,6 +10,9 @@ export interface Customer {
   phone: string | null;
   email: string | null;
   company: string | null;
+  kind?: 'private' | 'business' | null;
+  notes?: string | null;
+  reorder_reminded_at?: string | null;
   source: Source;
   tags: string[];
   created_at: string;
@@ -49,6 +52,9 @@ export interface Deal {
   updated_at: string;
   stage_changed_at: string;
   sent_messages?: Record<string, string>;
+  event_time?: string | null; distance_km?: number | null;
+  terms?: { accepted_at: string; version: string; lines: string[]; name: string | null } | null;
+  signals?: { quote_opens: number; last_opened_at: string | null; pdf_views: number; asked_human: boolean; price_questions: number; date_questions: number };
 }
 
 export interface Activity {
@@ -124,7 +130,7 @@ export interface Kpis {
   booked_this_month_value: number; booked_this_month_count: number; deposits_this_month: number;
   win_rate: number | null; avg_booked_value: number | null; hot_leads: number;
   open_tasks: number; overdue_tasks: number; handed_off_chats: number; escalated_chats: number;
-  chat_conversion: number | null; sources: Record<string, number>;
+  chat_to_booked: number | null; sources: Record<string, number>;
 }
 export interface Dashboard { kpis: Kpis; upcoming_events: Deal[]; }
 
@@ -258,18 +264,24 @@ export interface BusinessSettings {
   leftover_consumption: Record<string, number>; learning_min_events: number; learning_min_change: number; learning_window: number; closing_window_days: number;
   style_staffing: Record<string, { waiter_ratio: number; chef_ratio: number | null }>; guest_lock_days: number; late_guest_surcharge: number; late_decrease_charged: boolean;
   balance_reminder_days: number; automation_enabled: boolean; automation_hour: number; automation_last_run: string | null;
+  delivery_zones: DeliveryZone[]; delivery_windows: DeliveryWindow[]; require_terms: boolean;
+  cancellation_policy: { days_before: number; refund_rate: number }[]; terms_extra: string[];
+  reorder_reminder_days: number; score_weights: Record<string, number>;
 }
+export interface DeliveryZone { id: string; name: string; sku: string | null; role: string | null; keywords: string[]; max_km: number | null; default: boolean }
+export interface DeliveryWindow { id: string; name: string; start: string; end: string; days: number[]; price: number; cost: number | null }
 export interface PublicQuote {
   business_name: string; business_phone: string; business_email?: string; business_id?: string; vat_rate?: number; created_at?: string | null;
   number: string; status: string; customer_name: string | null;
   event: { type: string; date: string | null; guests: number | null; location: string | null; meal_type: string | null; kashrut: string | null };
   cover_note: string | null;
   tiers: { key: string; name: string; total: number; per_guest: number | null; deposit: number; items: { name: string; quantity: number; unit: string }[]; services: string[];
-    subtotal?: number; discount_rate?: number; discount?: number; net?: number; vat?: number }[];
+    subtotal?: number; discount_rate?: number; discount?: number; net?: number; vat?: number; per_guest_net?: number | null }[];
   selected_tier: string; valid_until: string; expired: boolean; deposit_rate: number; deposit_paid: number;
   can_accept: boolean; can_update_count: boolean; final_guest_count: number | null;
   guest_lock_date?: string | null; count_needs_approval?: boolean; pending_changes?: { kind: string; summary: string }[];
   menu?: { sku: string; name_he: string; tiers: string[]; slots: MenuSlot[] }[]; menu_lock?: MenuLock | null;
+  price_mode?: 'gross' | 'net'; terms?: string[]; terms_version?: string; terms_required?: boolean; terms_accepted_at?: string | null;
 }
 
 export interface ServiceChat { status: Conversation['status'] | null; messages: { role: 'user' | 'assistant'; text: string; by: string }[]; reply?: string | null; }
@@ -315,3 +327,13 @@ export interface PortionSuggestion {
 }
 export interface ClosedEvent { deal_id: string; title: string; event_date: string | null; planned_guests: number | null; actual_guests: number | null; planned_profit: number | null; actual_profit: number | null; actual_margin: number | null }
 export interface LearningView { suggestions: PortionSuggestion[]; events: ClosedEvent[]; to_close: { deal_id: string; title: string; event_date: string }[] }
+
+// stage 7: customers and sales
+export interface CustomerHistory {
+  customer_id: string; kind: 'private' | 'business'; kind_set: boolean;
+  events: { deal_id: string; title: string; event_type: string | null; event_date: string | null; guests: number | null; stage: DealStage; value_net: number; profit: number | null }[];
+  booked: number; total_net: number; avg_net: number | null; last_event: string | null; days_since_last: number | null;
+  reorder_due: boolean; reminded_at: string | null;
+}
+export interface SalesRow { key: string; label: string; deals: number; booked: number; lost: number; open: number; close_rate: number | null; avg_revenue: number | null; avg_profit: number | null; profit_events: number }
+export interface SalesReport { since: string; chats: number; chats_booked: number; chat_to_booked: number | null; by_event_type: SalesRow[]; by_source: SalesRow[] }

@@ -98,7 +98,8 @@ def _service_setup(tmp: Path, crm: CrmService, repo, catalog, engine, svc: dict,
     q = create_quote(repo, TENANT, req, plan, catalog, engine, "eval")
     sync.deliver(tenant, q, EventType.created)
     if svc.get("status", "approved") == "approved":
-        r = portal.accept(q.public_token, "recommended", today)
+        v = portal.view(q.public_token, today)  # the simulated customer accepts the terms
+        r = portal.accept(q.public_token, "recommended", today, v.terms_version)
         portal.confirm_payment(q.public_token, r["payment_id"])
     return ServiceContext(quote=repo.get(TENANT, q.id), portal=portal)
 

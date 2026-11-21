@@ -74,6 +74,38 @@ class Source(StrEnum):
     manual = "manual"
 
 
+class CustomerKind(StrEnum):
+    private = "private"    # פרטי: prices shown including VAT
+    business = "business"  # עסקי: prices before VAT, with a VAT line
+
+
+class TermsAcceptance(BaseModel):
+    """The terms the customer accepted on the quote page, exactly as shown, with when."""
+    accepted_at: datetime = Field(default_factory=lambda: now())
+    version: str
+    lines: list[str]
+    name: str | None = None  # the name the customer typed, if any
+
+
+class IntentSignals(BaseModel):
+    """What the customer did that shows intent (stage 7). Counted, never guessed."""
+    quote_opens: int = 0
+    last_opened_at: datetime | None = None
+    pdf_views: int = 0
+    asked_human: bool = False
+    price_questions: int = 0
+    date_questions: int = 0
+
+
+def customer_kind(c: Customer | None) -> CustomerKind:
+    """Explicit type, else business when there's a company name, else private."""
+    if c is None:
+        return CustomerKind.private
+    if c.kind:
+        return CustomerKind(c.kind)
+    return (CustomerKind.business if (c.company or "").strip() else CustomerKind.private)
+
+
 class Customer(BaseModel):
     id: str = Field(default_factory=_id)
     tenant_id: str
@@ -81,6 +113,8 @@ class Customer(BaseModel):
     phone: str | None = None  # E.164
     email: str | None = None
     company: str | None = None
+    kind: CustomerKind | None = Field(None, description="None: business if there's a company")
+    reorder_reminded_at: datetime | None = None
     source: Source = Source.manual
     tags: list[str] = Field(default_factory=list)
     notes: str | None = None
@@ -167,6 +201,12 @@ class Deal(BaseModel):
                                         description="manual checklist item -> when marked done")
     change_requests: list[ChangeRequest] = Field(default_factory=list)
     closing: EventClosing | None = None
+    # stage 7
+    event_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$",
+                                   description="when the food has to be there, local")
+    distance_km: float | None = Field(None, gt=0, le=1000)
+    terms: TermsAcceptance | None = None
+    signals: IntentSignals = Field(default_factory=IntentSignals)
     sent_messages: dict[str, str] = Field(default_factory=dict)  # message kind -> date sent
     owner: str | None = None
     lost_reason: str | None = None

@@ -102,7 +102,8 @@ class CrmService:
 
     def save_deal(self, deal: Deal) -> Deal:
         customer = self.customers.get(deal.tenant_id, deal.customer_id)
-        deal.lead_score, deal.score_reasons = score(deal, customer)
+        deal.lead_score, deal.score_reasons = score(
+            deal, customer, weights=self.settings.get(deal.tenant_id).score_weights)
         deal.title = self.deal_title(deal.event_type, customer, deal.guest_count, deal.event_date)
         deal.updated_at = now()
         return self.deals.put(deal)

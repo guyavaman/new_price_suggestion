@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.agent.service import ServiceContext
@@ -20,6 +20,9 @@ router = APIRouter(prefix="/public", tags=["customer page"])
 
 class AcceptIn(BaseModel):
     tier: str = Field(..., pattern="^(basic|recommended|premium)$")
+    terms_version: str | None = Field(None, max_length=40,
+                                      description="the version of the terms the customer accepted")
+    name: str | None = Field(None, max_length=80)
 
 
 class DeclineIn(BaseModel):
@@ -45,13 +48,17 @@ def _run(fn, *a):
 
 
 @router.get("/quotes/{token}", response_model=PublicQuote)
-def view(token: str, portal: CustomerPortal = Depends(get_portal)):
-    return _run(portal.view, token)
+def view(token: str, portal: CustomerPortal = Depends(get_portal), src: str | None = Query(
+        None, alias="from", description="link | pdf: the customer opened it (counted)")):
+    v = _run(portal.view, token)
+    if src in ("link", "pdf"):
+        portal.record_open(token, src)
+    return v
 
 
 @router.post("/quotes/{token}/accept")
 def accept(token: str, body: AcceptIn, portal: CustomerPortal = Depends(get_portal)) -> dict:
-    return _run(portal.accept, token, body.tier)
+    return _run(portal.accept, token, body.tier, None, body.terms_version, body.name)
 
 
 @router.post("/quotes/{token}/guest-count", response_model=PublicQuote)

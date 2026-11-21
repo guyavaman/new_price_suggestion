@@ -66,7 +66,15 @@ HISTORY = [
     ("רחל דוד", "0502020202", "brit", -29, 50, "dairy", "kosher", "completed", False, "referral"),
     ("Nova Systems Ltd", "0503030303", "corporate", -41, 80, "meat", "kosher", "completed", False, "email"),
     ("תמר וייס", "0504040404", "birthday", -55, 45, "dairy", "kosher", "completed", False, "whatsapp"),
+    # a business customer that ordered long ago and went quiet (stage 7: reorder reminder)
+    ("סטודיו אלמה בע\"מ", "0505050505", "corporate", -128, 60, "dairy", "kosher", "completed", False, "email"),
 ]
+# what open leads did on their quote (stage 7: intent signals in the lead score)
+SIGNALS = {
+    "מיכל לוי": {"quote_opens": 4, "pdf_views": 1, "price_questions": 2},
+    "אבי מזרחי": {"quote_opens": 1, "date_questions": 1},
+}
+BUSINESS = {"Nova Systems Ltd", "סטודיו אלמה בע\"מ", "Amir Tech Ltd", "דנה שפירא", "עומר פרץ"}
 # per event: guests who came, leftover mark by category (default "ok"), purchasing vs plan, notes
 CLOSINGS = {
     "משפחת אורן": (104, {"salad": "lot", "main": "out"}, 1.06, "הסלטים חזרו כמעט מלאים. השניצלים נגמרו מוקדם."),
@@ -100,7 +108,8 @@ READY = {
                   "marks": [], "menu": False, "change": 72},
 }
 BOOKED_DAYS_AGO = {"נטע אברהם": 2, "דנה שפירא": 9, "עומר פרץ": 40, "גיא שמש": 55,
-                   "משפחת אורן": 70, "רחל דוד": 60, "Nova Systems Ltd": 95, "תמר וייס": 100}
+                   "משפחת אורן": 70, "רחל דוד": 60, "Nova Systems Ltd": 95, "תמר וייס": 100,
+                   "סטודיו אלמה בע\"מ": 160}
 
 CHAT = [
     ("user", "היי, אני מתכננת בר מצווה לבן שלי, בערך 120 איש"),
@@ -131,6 +140,7 @@ def seed(reset: bool = False) -> None:
     _add_samples(crm, repo, catalog, SAMPLES + HISTORY)
     seed_team(crm, repo, catalog)
     seed_closings(crm, repo, catalog)
+    seed_commerce(crm)
     print(f"Seeded {len(SAMPLES)} deals for tenant '{TENANT}'.")
 
 
@@ -307,7 +317,25 @@ def backfill() -> list[str]:
         _add_samples(crm, repo, catalog, new)
         seed_closings(crm, repo, catalog)
         done.append("closings")
+    if not any(c.kind for c in crm.customers.list(TENANT)):
+        seed_commerce(crm)
+        done.append("commerce")
     return done
+
+
+def seed_commerce(crm) -> None:
+    """Stage 7: business customers, and intent signals on open quotes."""
+    from app.crm.models import CustomerKind, IntentSignals
+    for c in crm.customers.list(TENANT):
+        if (c.name or c.company) in BUSINESS and c.kind is None:
+            c.kind = CustomerKind.business
+            crm.customers.put(c)
+    names = {c.id: c.name or c.company for c in crm.customers.list(TENANT)}
+    for d in crm.deals.list(TENANT):
+        sig = SIGNALS.get(names.get(d.customer_id, ""))
+        if sig and d.signals.quote_opens == 0:
+            d.signals = IntentSignals(**sig)
+            crm.save_deal(d)
 
 
 def seed_team_if_missing() -> bool:

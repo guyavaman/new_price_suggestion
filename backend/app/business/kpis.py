@@ -77,8 +77,16 @@ class Kpis(BaseModel):
     overdue_tasks: int
     handed_off_chats: int
     escalated_chats: int
-    chat_conversion: float | None
+    chat_to_booked: float | None  # chats (not on a quote page) that became a booked event
     sources: dict[str, int]
+
+
+def _chat_to_booked(convs, deals: dict) -> float | None:
+    sales = [c for c in convs if not c.quote_id]  # service chats are already customers
+    if not sales:
+        return None
+    won = sum(1 for c in sales if c.deal_id in deals and is_booked(deals[c.deal_id]))
+    return round(won / len(sales), 3)
 
 
 def compute(crm, tenant: str, rules, today: date | None = None) -> Kpis:
@@ -112,8 +120,7 @@ def compute(crm, tenant: str, rules, today: date | None = None) -> Kpis:
         overdue_tasks=sum(1 for t in tasks if t.due_at and t.due_at < now()),
         handed_off_chats=sum(1 for c in convs if c.status == "handed_off"),
         escalated_chats=sum(1 for c in convs if c.escalated and c.status != "closed"),
-        chat_conversion=(round(sum(1 for c in convs if c.deal_id) / len(convs), 3)
-                         if convs else None),
+        chat_to_booked=_chat_to_booked(convs, {d.id: d for d in deals}),
         sources=dict(Counter(d.source.value for d in deals)),
     )
 

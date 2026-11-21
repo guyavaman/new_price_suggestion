@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 import { ApiService } from '../core/api.service';
 import { HeDatePipe, IlsPipe, RelativePipe } from '../core/format';
 import { EVENT_TYPE, SOURCE, STAGE_LABEL } from '../core/labels';
-import { Dashboard, ProfitReport } from '../core/models';
+import { Dashboard, ProfitReport, SalesReport } from '../core/models';
 
 @Component({
   selector: 'app-dashboard',
@@ -27,7 +27,7 @@ import { Dashboard, ProfitReport } from '../core/models';
         <div class="card kpi"><span>נסגר החודש</span><b class="num" data-kpi="booked_this_month_value">{{ d.kpis.booked_this_month_value | ils }}</b><small>{{ d.kpis.booked_this_month_count }} אירועים · לפני מע"מ</small></div>
         <div class="card kpi"><span>אחוז סגירה</span><b class="num">{{ pct(d.kpis.win_rate) }}</b><small>מתוך עסקאות שהסתיימו</small></div>
         <div class="card kpi"><span>עסקה ממוצעת</span><b class="num">{{ d.kpis.avg_booked_value | ils }}</b></div>
-        <div class="card kpi"><span>המרת צ'אט לליד</span><b class="num">{{ pct(d.kpis.chat_conversion) }}</b><small>שיחות סוכן AI</small></div>
+        <div class="card kpi"><span>המרת צ'אט לאירוע סגור</span><b class="num">{{ pct(d.kpis.chat_to_booked) }}</b><small>שיחות מכירה עם הסוכן שהפכו לאירוע</small></div>
       </div>
       <div class="cols">
         <section class="card">
@@ -114,6 +114,30 @@ import { Dashboard, ProfitReport } from '../core/models';
         <p class="muted note">אירוע בלי עלות מלאה מוצג בנפרד ולא נכנס לחישוב הרווח, כדי שלא יוצג רווח שלא באמת ידוע.</p>
       </section>
     }
+    @if (sr(); as sr) {
+      <section class="card profit-rep" aria-labelledby="sr-h">
+        <div class="pr-head">
+          <h2 id="sr-h">סגירה ורווח לפי סוג אירוע ומקור</h2>
+          <small class="muted">עסקאות שנפתחו מאז {{ sr.since | heDate }} · אחוז סגירה = נסגרו מתוך נסגרו + אבודות · לפני מע"מ</small>
+        </div>
+        <div class="pr-tabs" role="tablist">
+          <button role="tab" type="button" [attr.aria-selected]="srTab() === 'by_event_type'" (click)="srTab.set('by_event_type')">לפי סוג אירוע</button>
+          <button role="tab" type="button" [attr.aria-selected]="srTab() === 'by_source'" (click)="srTab.set('by_source')">לפי מקור ליד</button>
+        </div>
+        <div class="tw"><table class="sales">
+          <thead><tr><th></th><th class="num">עסקאות</th><th class="num">נסגרו</th><th class="num">אבודות</th><th class="num">פתוחות</th><th class="num">אחוז סגירה</th><th class="num">הכנסה ממוצעת</th><th class="num">רווח ממוצע</th></tr></thead>
+          <tbody>
+            @for (r of sr[srTab()]; track r.key) {
+              <tr><td><b>{{ r.label }}</b></td><td class="num">{{ r.deals }}</td><td class="num">{{ r.booked }}</td><td class="num">{{ r.lost }}</td><td class="num">{{ r.open }}</td>
+                <td class="num">{{ pct(r.close_rate) }}</td>
+                <td class="num">@if (r.avg_revenue !== null) { {{ r.avg_revenue | ils }} } @else { — }</td>
+                <td class="num">@if (r.avg_profit !== null) { {{ r.avg_profit | ils }}@if (r.profit_events < r.booked) { <small class="muted"> ({{ r.profit_events }} מ-{{ r.booked }})</small> } } @else { — }</td></tr>
+            } @empty { <tr><td colspan="8" class="muted">אין עדיין עסקאות בתקופה</td></tr> }
+          </tbody>
+        </table></div>
+        <p class="muted note">שיחות מכירה בצ'אט: {{ sr.chats }}, מהן {{ sr.chats_booked }} הפכו לאירוע סגור ({{ pct(sr.chat_to_booked) }}). רווח ממוצע רק מאירועים שכל העלויות שלהם ידועות.</p>
+      </section>
+    }
   `,
   styles: [`
     .alerts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -136,7 +160,8 @@ import { Dashboard, ProfitReport } from '../core/models';
     .row .bar.src i { background: var(--honey); }
     .cnt { text-align: end; font-weight: 700; }
     .val { text-align: end; font-size: .85rem; }
-    .profit-rep { margin-top: 14px; display: grid; gap: 10px; }
+    .profit-rep { margin-top: 14px; display: grid; gap: 10px; min-width: 0; }
+    .tw { overflow-x: auto; } .sales { width: 100%; }
     .pr-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
     .pr-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
     .pr-tabs button { border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 4px 12px; cursor: pointer; font: inherit; }
@@ -167,8 +192,11 @@ export class DashboardComponent {
   prTab = signal<'by_month' | 'by_event_type' | 'by_package' | 'events'>('by_month');
   prRows = computed(() => { const r = this.pr(); const t = this.prTab(); return r && t !== 'events' ? r[t] : []; });
 
+  sr = signal<SalesReport | null>(null);
+  srTab = signal<'by_event_type' | 'by_source'>('by_event_type');
   constructor() {
     this.api.profitReport(6).subscribe({ next: (r) => this.pr.set(r), error: () => this.pr.set(null) });
+    this.api.salesReport(12).subscribe({ next: (r) => this.sr.set(r), error: () => this.sr.set(null) });
     this.api.dashboard().subscribe({
       next: (d) => this.d.set(d),
       error: () => this.error.set('השרת לא זמין. הפעילו את ה-backend על פורט 8000.'),

@@ -167,3 +167,6 @@ class ReadinessPatch(BaseModel):
     site: dict | None = None
     marks: dict[str, bool] | None = None   # {"staff": true, "equipment": false}
     service_style: ServiceStyle | None = None
+    # stage 7: delivery is priced by zone (distance or place) and time window
+    event_time: str | None = Field(None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    distance_km: float | None = Field(None, gt=0, le=1000)

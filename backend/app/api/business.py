@@ -110,9 +110,29 @@ def patch_readiness(deal_id: str, body: ReadinessPatch, t: TenantConfig = Depend
     """Venue, on-site contact, site conditions and the manual checklist marks."""
     d = _deal_or_404(crm, t.tenant_id, deal_id)
     data = body.model_dump(exclude_unset=True)
+    delivery = {f: data[f] for f in ("location", "event_time", "distance_km")
+                if f in data and data[f] != getattr(d, f)}
     for f in ("location", "site_contact_name", "site_contact_phone"):
         if f in data:
             setattr(d, f, (data[f] or "").strip() or None)
+    for f in ("event_time", "distance_km"):
+        if f in data:
+            setattr(d, f, data[f])
+    if delivery:  # the delivery line depends on these: re-price the quote
+        q = latest_quote(repo, d)
+        if q is not None:
+            old = q.tier().quote.total
+            q.request.location, q.request.event_time = d.location, d.event_time
+            q.request.distance_km = d.distance_km
+            catalog = svc.items(t.tenant_id)
+            q.tiers = tiers_for(q.request, q.plan, catalog, PricingEngine(
+                catalog, rules=s.get(t.tenant_id), choices=q.menu_choices))
+            repo.save(q)
+            d.set_value(q.tier().quote.total, q.tier().quote.net)
+            if round(old) != round(d.value or 0):
+                crm.log(t.tenant_id, ActivityKind.note,
+                        f"משלוח עודכן (מיקום/שעה/מרחק). המחיר עודכן ל-₪{d.value:,.0f}",
+                        Actor.user, deal_id=d.id)
     if data.get("site") is not None:
         try:
             d.site = SiteConditions.model_validate({**d.site.model_dump(), **data["site"]})
@@ -195,6 +215,7 @@ def quote_from_deal(deal_id: str, t: TenantConfig = Depends(get_tenant),
     req = ExtractedRequest(
         language="he", event_type=d.event_type, guest_count=d.guest_count,
         event_date=d.event_date, location=d.location, kashrut=d.kashrut, meal_type=d.meal_type,
+        event_time=d.event_time, distance_km=d.distance_km,
         contact=ContactInfo(name=c.name if c else None, phone=c.phone if c else None,
                             email=c.email if c else None, company=c.company if c else None),
         service={"style": d.service_style} if d.service_style else {})

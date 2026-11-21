@@ -12,8 +12,18 @@ from pydantic import BaseModel
 
 from app.business.changes import guest_lock_date, menu_summary, request_change, set_guests
 from app.business.settings import BusinessSettings, SettingsService
+from app.business.terms import terms_lines, terms_version
 from app.catalog.service import CatalogService
-from app.crm.models import ActivityKind, Actor, Deal, DealStage, Payment, now
+from app.crm.models import (
+    ActivityKind,
+    Actor,
+    Deal,
+    DealStage,
+    Payment,
+    TermsAcceptance,
+    customer_kind,
+    now,
+)
 from app.crm.service import CrmService
 from app.integrations.canonical import EVENT_TYPE_HE, EventType
 from app.integrations.config import TenantConfig, load_tenant
@@ -54,6 +64,7 @@ class PublicTier(BaseModel):
     discount: float = 0
     net: float = 0
     vat: float = 0
+    per_guest_net: float | None = None
 
 
 class PublicQuote(BaseModel):
@@ -83,6 +94,12 @@ class PublicQuote(BaseModel):
     guest_lock_date: date | None = None
     count_needs_approval: bool = False
     pending_changes: list[dict] = []  # [{kind, summary}] waiting for the business
+    # stage 7: a business customer sees prices before VAT (+ a VAT line), a private one with VAT
+    price_mode: str = "gross"  # gross | net
+    terms: list[str] = []
+    terms_version: str = ""
+    terms_required: bool = True
+    terms_accepted_at: datetime | None = None
 
 
 class CustomerPortal:
@@ -135,9 +152,13 @@ class CustomerPortal:
                                     per_guest=t.quote.per_guest, items=items, services=services,
                                     deposit=round(t.quote.total * rules.deposit_rate, 2),
                                     subtotal=t.quote.subtotal, discount_rate=t.quote.discount_rate,
-                                    discount=t.quote.discount, net=t.quote.net, vat=t.quote.vat))
+                                    discount=t.quote.discount, net=t.quote.net, vat=t.quote.vat,
+                                    per_guest_net=(round(t.quote.net / r_guests, 2)
+                                                   if (r_guests := q.request.guest_count)
+                                                   else None)))
         r = q.request
         event_date = r.event_date
+        lines = terms_lines(rules)
         return PublicQuote(
             business_name=rules.business_name, business_phone=rules.phone,
             business_email=rules.email, business_id=rules.business_id, vat_rate=rules.vat_rate,
@@ -160,7 +181,30 @@ class CustomerPortal:
                              if r.status == "pending"],
             final_guest_count=deal.final_guest_count if deal else None,
             menu=customer_menu(q, by_sku), menu_lock=lock(q, rules, today, expired),
+            price_mode=self._price_mode(q, deal), terms=lines, terms_version=terms_version(lines),
+            terms_required=rules.require_terms,
+            terms_accepted_at=deal.terms.accepted_at if deal and deal.terms else None,
         )
+
+    def _price_mode(self, q: StoredQuote, deal: Deal | None) -> str:
+        c = self.crm.customers.get(q.tenant_id, deal.customer_id) if deal else None
+        if c is None and (q.request.contact.company or "").strip():
+            return "net"
+        return "net" if customer_kind(c).value == "business" else "gross"
+
+    def record_open(self, token: str, kind: str) -> None:
+        """The customer opened the quote (link) or its printable version (pdf): an intent
+        signal for the lead score. The owner's own preview doesn't count."""
+        q = self._quote(token)
+        deal = self._deal(q)
+        if deal is None or kind not in ("link", "pdf"):
+            return
+        if kind == "pdf":
+            deal.signals.pdf_views += 1
+        else:
+            deal.signals.quote_opens += 1
+            deal.signals.last_opened_at = now()
+        self.crm.save_deal(deal)  # re-scores
 
     # ---------- dishes ----------
     def choose_menu(self, token: str, package: str, choice: dict[str, list[str]],
@@ -222,16 +266,32 @@ class CustomerPortal:
         return self.view(token, today)
 
     # ---------- accept + deposit ----------
-    def accept(self, token: str, tier: str, today: date | None = None) -> dict:
+    def accept(self, token: str, tier: str, today: date | None = None,
+               terms_version: str | None = None, name: str | None = None) -> dict:
         v = self.view(token, today)
         if not v.can_accept:
             raise PortalError("פג תוקף ההצעה או שכבר אושרה. צרו קשר ונשמח לעדכן."
                               if v.expired else "ההצעה כבר אושרה")
+        if v.terms_required and terms_version != v.terms_version:
+            # missing, or accepted an older text: they must see and accept the current terms
+            raise PortalError("כדי להמשיך יש לקרוא ולאשר את תנאי ההזמנה", 409)
         q = self._quote(token)
         q.tier(tier)  # validates
         q.selected_tier = tier
         rules = self._rules(q)
         deal = self._deal(q)
+        if v.terms_required:
+            if deal is None:  # quote never reached the CRM (no integration): create it now
+                self.repo.save(q)
+                self._emit(q, EventType.updated)
+                deal = self._deal(q)
+            if deal is not None:
+                deal.terms = TermsAcceptance(version=v.terms_version, lines=v.terms,
+                                             name=(name or "").strip()[:80] or None)
+                self.crm.save_deal(deal)
+                self.crm.log(q.tenant_id, ActivityKind.note,
+                             f"הלקוח אישר את תנאי ההזמנה (גרסה {v.terms_version})",
+                             Actor.customer, deal_id=deal.id)
         deposit = round(q.tier().quote.total * rules.deposit_rate, 2)
         if deposit <= 0:
             self._approve(q, deal, None)

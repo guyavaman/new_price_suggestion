@@ -136,6 +136,26 @@ def run_automation(crm: CrmService, repo, rules: BusinessSettings, tenant: str,
                 if d.closing is None and "closing" not in d.automation:
                     act(d, "closing", "למלא סיכום אירוע: אורחים בפועל, שאריות ועלויות",
                         "סיכום האירוע ממתין (מתוכנן מול בפועל)", due_hours=24)
+
+    # returning business customers who went quiet (once per reminder period per customer)
+    from app.business.commerce import reorder_due  # late: commerce imports kpis
+    for c in reorder_due(crm, rules, tenant, today):
+        mine = sorted(crm.deals_for_customer(tenant, c.id),
+                      key=lambda d: d.event_date or date.min)
+        last = mine[-1] if mine else None
+        who = c.company or c.name or "לקוח עסקי"
+        days = (today - last.event_date).days if last and last.event_date else None
+        title = f"לחזור ל{who}: לא הזמינו {days} ימים" if days else f"לחזור ל{who}"
+        crm.add_task(tenant, title, deal_id=last.id if last else None,
+                     due_at=now() + timedelta(hours=24), created_by=Actor.system,
+                     kind="reorder")
+        crm.log(tenant, ActivityKind.system, f"תזכורת ללקוח חוזר: {title}", Actor.system,
+                deal_id=last.id if last else None, customer_id=c.id,
+                meta={"automation": "reorder"})
+        c.reorder_reminded_at = now()
+        crm.customers.put(c)
+        if last:
+            actions.append(AutomationAction(rule="reorder", deal_id=last.id, title=title))
     return actions
 
 
